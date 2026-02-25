@@ -74,12 +74,21 @@ void JeandleAssembler::emit_oop_reloc(int offset, jobject oop_handle, int64_t ad
   Unimplemented();
 }
 
+void JeandleAssembler::emit_oop_addr_reloc(int offset, jobject oop_handle) {
+  Unimplemented();
+}
+
 int JeandleAssembler::fixup_call_inst_offset(int offset) {
   Unimplemented();
 }
 
 bool JeandleAssembler::is_oop_reloc(LinkSymbol& target, LinkKind kind) {
   Unimplemented();
+}
+
+bool JeandleAssembler::is_oop_addr_reloc(LinkSymbol& target, LinkKind kind) {
+  // Unimplemented
+  return false;
 }
 
 bool JeandleAssembler::is_routine_call_reloc(LinkSymbol& target, LinkKind kind) {

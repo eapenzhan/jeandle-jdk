@@ -90,10 +90,14 @@ void Relocation::pd_set_call_destination(address x) {
 }
 
 void Relocation::pd_set_jeandle_data_value(address x, int addend, bool verify_only) {
-  assert(type() == relocInfo::jeandle_section_word_type ||
-         type() == relocInfo::jeandle_oop_type,
-         "unexpected reloc type: %d", type());
+  assert(is_jeandle_reloc(), "unexpected reloc type: %d", type());
   if (verify_only) {
+    return;
+  }
+
+  if (addr_in_const()) {
+    assert(type() == relocInfo::jeandle_oop_addr_type, "must be in const section");
+    *(oop**)addr() = (oop*)x;
     return;
   }
 
@@ -117,7 +121,7 @@ void Relocation::pd_set_jeandle_data_value(address x, int addend, bool verify_on
     uint32_t shift = Instruction_aarch64::extract(*(uint32_t*)insn_addr, 31, 30);
     int offset_lo = ((target + addend) & 0xfff) >> shift;
     Instruction_aarch64::patch(insn_addr, 21, 10, offset_lo);
-    guarantee((((target + addend) >> shift) << shift) == target, "misaligned target");
+    guarantee((((target + addend) >> shift) << shift) == (target + addend), "misaligned target");
   } else if (NativeInstruction::is_add_imm_at(insn_addr)) {
     int offset_lo = (target + addend) & 0xfff;
     Instruction_aarch64::patch(insn_addr, 21, 10, offset_lo);
@@ -156,4 +160,12 @@ void poll_Relocation::fix_relocation_after_move(const CodeBuffer* src, CodeBuffe
 }
 
 void metadata_Relocation::pd_fix_value(address x) {
+}
+
+void jeandle_oop_addr_Relocation::fix_relocation_after_move(const CodeBuffer* src, CodeBuffer* dest) {
+  assert(addr_in_const(), "must in const section");
+  address old_addr = *(address*)addr();
+  int delta = dest - src;
+  address new_addr = old_addr + delta;
+  set_value(new_addr);
 }

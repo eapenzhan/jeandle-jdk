@@ -27,6 +27,8 @@
  *      -XX:CompileCommand=compileonly,compiler.jeandle.bytecodeTranslate.TestTableSwitch::zeroCrossSwitch
  *      -XX:CompileCommand=compileonly,compiler.jeandle.bytecodeTranslate.TestTableSwitch::largeRangeSwitch
  *      -XX:CompileCommand=compileonly,compiler.jeandle.bytecodeTranslate.TestTableSwitch::callMethodSwitch
+ *      -XX:CompileCommand=compileonly,compiler.jeandle.bytecodeTranslate.TestTableSwitch::returnStringSwitch
+ *      -XX:CompileCommand=compileonly,compiler.jeandle.bytecodeTranslate.TestTableSwitch::singleByteAlignedSwitch
  *      -XX:+UseJeandleCompiler compiler.jeandle.bytecodeTranslate.TestTableSwitch
  */
 
@@ -35,10 +37,14 @@ package compiler.jeandle.bytecodeTranslate;
 import jdk.test.lib.Asserts;
 
 public class TestTableSwitch {
+    public static int[] intArr = new int[]{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
+
     public static void main(String[] args) throws Exception {
         testBasicBoundaryScenarios();
         testLargeRangeSwitch();
         testCallMethodSwitch();
+        testReturnStringSwitch();
+        testSingleByteAlignedSwitch();
     }
 
     public static int minPositiveSwitch(int num) {
@@ -127,4 +133,109 @@ public class TestTableSwitch {
     public static int returnEight() { return 8; }
     public static int returnNine()  { return 9; }
     public static int returnTen()   { return 10; }
+
+    private static void testReturnStringSwitch() {
+        Asserts.assertEquals(returnStringSwitch(0), "Zero");
+        Asserts.assertEquals(returnStringSwitch(1), "One");
+        Asserts.assertEquals(returnStringSwitch(2), "Two");
+        Asserts.assertEquals(returnStringSwitch(3), "Three");
+        Asserts.assertEquals(returnStringSwitch(4), "Four");
+        Asserts.assertEquals(returnStringSwitch(5), "Five");
+        Asserts.assertEquals(returnStringSwitch(6), "Six");
+        Asserts.assertEquals(returnStringSwitch(7), "Seven");
+        Asserts.assertEquals(returnStringSwitch(8), "Eight");
+        Asserts.assertEquals(returnStringSwitch(9), "Nine");
+        Asserts.assertEquals(returnStringSwitch(10), "default");
+    }
+
+    public static String returnStringSwitch(int number) {
+        switch (number) {
+            case 0:
+                return "Zero";
+            case 1:
+                return "One";
+            case 2:
+                return "Two";
+            case 3:
+                return "Three";
+            case 4:
+                return "Four";
+            case 5:
+                return "Five";
+            case 6:
+                return "Six";
+            case 7:
+                return "Seven";
+            case 8:
+                return "Eight";
+            case 9:
+                return "Nine";
+            default:
+                return "default";
+        }
+    }
+
+    private static void testSingleByteAlignedSwitch() {
+        Asserts.assertEquals(singleByteAlignedSwitch(5, 4), 10);
+        Asserts.assertEquals(singleByteAlignedSwitch(5, 5), 10);
+        Asserts.assertEquals(singleByteAlignedSwitch(8, 6), 4);
+        Asserts.assertEquals(singleByteAlignedSwitch(3, 7), 8);
+        Asserts.assertEquals(singleByteAlignedSwitch(11, 6), 7);
+        Asserts.assertEquals(singleByteAlignedSwitch(12, 1), 1);
+        Asserts.assertEquals(singleByteAlignedSwitch(13, 10), 0);
+    }
+
+    public static int singleByteAlignedSwitch(int m, int n) {
+        switch (m) {
+            case 0:
+                return intArr[2];
+            case 1:
+                return intArr[1];
+            case 2:
+                return intArr[5];
+            case 3:
+                return intArr[8];
+            case 4:
+                return intArr[6];
+            case 5:
+                return intArr[10];
+            case 6:
+                return intArr[7];
+            case 7:
+                return intArr[3];
+            case 8:
+                return intArr[4];
+            case 9:
+                return intArr[9];
+            case 10:
+                return intArr[0];
+            default:
+        }
+        switch (n) {
+            case 0:
+                return intArr[2];
+            case 1:
+                return intArr[1];
+            case 2:
+                return intArr[5];
+            case 3:
+                return intArr[8];
+            case 4:
+                return intArr[6];
+            case 5:
+                return intArr[10];
+            case 6:
+                return intArr[7];
+            case 7:
+                return intArr[3];
+            case 8:
+                return intArr[4];
+            case 9:
+                return intArr[9];
+            case 10:
+                return intArr[0];
+            default:
+                return 0;
+        }
+    }
 }

@@ -215,6 +215,10 @@ void JeandleAssembler::emit_oop_reloc(int offset, jobject oop_handle, int64_t ad
   __ code_section()->relocate(at_address, rspec, __ disp32_operand);
 }
 
+void JeandleAssembler::emit_oop_addr_reloc(int offset, jobject oop_handle) {
+  Unimplemented();
+}
+
 int JeandleAssembler::fixup_call_inst_offset(int offset) {
   assert(offset >= 0, "invalid offset");
   return offset - NativeJump::data_offset + NativeJump::instruction_size;
@@ -222,6 +226,11 @@ int JeandleAssembler::fixup_call_inst_offset(int offset) {
 
 bool JeandleAssembler::is_oop_reloc(LinkSymbol& target, LinkKind kind) {
   return !target.isDefined() && kind == LinkKind_x86_64::Delta32;
+}
+
+bool JeandleAssembler::is_oop_addr_reloc(LinkSymbol& target, LinkKind kind) {
+  // Unimplemented
+  return false;
 }
 
 bool JeandleAssembler::is_routine_call_reloc(LinkSymbol& target, LinkKind kind) {
