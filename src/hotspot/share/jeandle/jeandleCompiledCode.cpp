@@ -328,6 +328,9 @@ void JeandleCompiledCode::finalize() {
                           sizeof(relocInfo) + relocInfo::length_limit,
                           128,
                           _env->oop_recorder());
+  if (_code_buffer.blob() == nullptr) {
+    JEANDLE_REPORT_ERROR_AND_RET_VOID("CodeCache is full");
+  }
   _code_buffer.initialize_consts_size(consts_size);
 
   // Initialize assembler.
@@ -369,8 +372,9 @@ void JeandleCompiledCode::finalize() {
   RETURN_VOID_ON_JEANDLE_ERROR();
 
   // generate shared trampoline stubs
-  bool success = _code_buffer.finalize_stubs();
-  JEANDLE_ERROR_ASSERT_AND_RET_VOID_ON_FAIL(success, "shared stub overflow");
+  if (!_code_buffer.finalize_stubs()) {
+    JEANDLE_REPORT_ERROR_AND_RET_VOID("shared stub overflow");
+  }
 
   if (_method) {
     // For Java method compilation.

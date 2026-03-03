@@ -78,8 +78,6 @@ compiler/c2/irTests/loopOpts/LoopIdealizationTests.java                         
 compiler/c2/irTests/scalarReplacement/ScalarReplacementTests.java                              linux-aarch64,linux-x64
 compiler/c2/irTests/stringopts/TestNegativeArraySize.java                                      linux-aarch64,linux-x64
 compiler/c2/unloaded/TestInlineUnloaded.java                                                   linux-aarch64,linux-x64
-compiler/codecache/CodeCacheFullCountTest.java                                                 linux-aarch64,linux-x64
-compiler/codecache/TestStressCodeBuffers.java                                                  linux-aarch64,linux-x64
 compiler/codegen/BMI2.java                                                                     linux-aarch64,linux-x64
 compiler/codegen/TestTrichotomyExpressions.java                                                linux-aarch64,linux-x64
 compiler/escapeAnalysis/Test6775880.java                                                       linux-aarch64,linux-x64
