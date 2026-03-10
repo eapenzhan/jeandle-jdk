@@ -106,10 +106,12 @@ class CallSiteInfo : public JeandleCompilationResourceObj {
   CallSiteInfo(JeandleCompiledCall::Type type,
                address target,
                int bci,
+               bool is_method_handle_invoke = false,
                uint64_t statepoint_id = llvm::StatepointDirectives::DefaultStatepointID) :
                _type(type),
                _target(target),
                _bci(bci),
+               _is_method_handle_invoke(is_method_handle_invoke),
                _statepoint_id(statepoint_id) {
 #ifdef ASSERT
     // We don't need to assign a unique statepoint id for each routine call site, only call type and target is used.
@@ -127,11 +129,13 @@ class CallSiteInfo : public JeandleCompilationResourceObj {
   JeandleCompiledCall::Type type() const { return _type; }
   uint64_t statepoint_id() const { return _statepoint_id; }
   address target() const { return _target; }
+  bool is_method_handle_invoke() const { return _is_method_handle_invoke; }
 
  private:
   JeandleCompiledCall::Type _type;
   address _target;
   int _bci;
+  bool _is_method_handle_invoke;
 
   // Used to distinguish each call site in stackmaps.
   uint64_t _statepoint_id;
@@ -179,7 +183,8 @@ class JeandleCompiledCode : public StackObj {
                       _env(env),
                       _method(method),
                       _routine_entry(nullptr),
-                      _func_name(JeandleFuncSig::method_name_with_signature(_method)) {}
+                      _func_name(JeandleFuncSig::method_name_with_signature(_method)),
+                      _has_method_handle_invoke(false) {}
 
   // For compiled Jeandle runtime stubs.
   JeandleCompiledCode(ciEnv* env, const char* func_name) :
@@ -191,7 +196,8 @@ class JeandleCompiledCode : public StackObj {
                       _env(env),
                       _method(nullptr),
                       _routine_entry(nullptr),
-                      _func_name(func_name) {}
+                      _func_name(func_name),
+                      _has_method_handle_invoke(false) {}
 
   void install_obj(std::unique_ptr<ObjectBuffer> obj);
 
@@ -212,6 +218,8 @@ class JeandleCompiledCode : public StackObj {
   ImplicitExceptionTable* implicit_exception_table() { return &_implicit_exception_table; }
 
   int frame_size() const { return _frame_size; }
+
+  void set_has_method_handle_invoke(bool z) { _has_method_handle_invoke = z;}
 
   address routine_entry() const { return _routine_entry; }
   void set_routine_entry(address entry) { _routine_entry = entry; }
@@ -249,6 +257,7 @@ class JeandleCompiledCode : public StackObj {
   ciMethod* _method;
   address _routine_entry;
   std::string _func_name;
+  bool _has_method_handle_invoke;
 
   void setup_frame_size();
 

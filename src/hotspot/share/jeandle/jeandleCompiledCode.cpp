@@ -187,7 +187,7 @@ class JeandleCallReloc : public JeandleReloc {
                              _call->bci(),
                              _stack_map->reexecute(),
                              false,
-                             false,
+                             _call->is_method_handle_invoke(),
                              false,
                              false,
                              false,
@@ -383,8 +383,15 @@ void JeandleCompiledCode::finalize() {
 
   build_implicit_exception_table();
 
-  // TODO: generate code for deopt handler.
-  _offsets.set_value(CodeOffsets::Deopt, masm->offset());
+  // generate code for deopt handler.
+  if (_method) {
+    _offsets.set_value(CodeOffsets::Deopt, assembler.emit_deopt_handler());
+    RETURN_VOID_ON_JEANDLE_ERROR();
+    if (_has_method_handle_invoke) {
+      _offsets.set_value(CodeOffsets::DeoptMH, assembler.emit_deopt_handler());
+      RETURN_VOID_ON_JEANDLE_ERROR();
+    }
+  }
 }
 
 void JeandleCompiledCode::resolve_reloc_info(JeandleAssembler& assembler) {

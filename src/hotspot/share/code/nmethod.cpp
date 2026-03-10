@@ -2046,7 +2046,7 @@ void nmethod::copy_scopes_pcs(PcDesc* pcs, int count) {
       break;
     }
   }
-  assert(has_method_handle_invokes() == (_deopt_mh_handler_begin != nullptr), "must have deopt mh handler");
+  assert(has_method_handle_invokes() == (_deopt_mh_handler_begin != nullptr), "must have deopt mh handler, expected: %d", has_method_handle_invokes());
 
   int size = count * sizeof(PcDesc);
   assert(scopes_pcs_size() >= size, "oob");

@@ -269,7 +269,11 @@
 
 #define ALL_JEANDLE_ASSEMBLY_ROUTINES(def) \
   def(exceptional_return)                  \
-  def(exception_handler)
+  def(exception_handler)                   \
+  /* Keep the order of deopt blobs defs. */\
+  def(deopt_blob)                          \
+  def(deopt_blob_with_reexcution)          \
+  def(deopt_blob_with_exception)
 
 
 // JeandleRuntimeRoutine contains C/C++/Assembly routines and Hotspot routines that can be called from Jeandle compiled code.
@@ -350,6 +354,8 @@ class JeandleRuntimeRoutine : public AllStatic {
  private:
   static llvm::StringMap<address> _routine_entry; // All the routines.
   static llvm::DenseSet<address> _gc_leaf_routines; // All the gc leaf routines.
+
+  static DeoptimizationBlob* _raw_deopt_blob;
 
   // C/C++ routine implementations:
 
