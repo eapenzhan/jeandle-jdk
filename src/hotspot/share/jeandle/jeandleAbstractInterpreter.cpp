@@ -201,6 +201,7 @@ llvm::SmallVector<llvm::Value*> JeandleVMState::deopt_args(llvm::IRBuilder<>& bu
   // |--- bci ---|--- locals ---|--- stack ---|--- monitor ---|
   /* TODO: scalar */
   args.push_back(builder.getInt32(bci));
+  args.push_back(builder.getInt64(bci));
   for (size_t i = 0; i < _locals.size(); i++) {
     if (!_locals[i].is_null()) {
       uint64_t encode = DeoptValueEncoding(i, DeoptValueEncoding::LocalType, _locals[i].computational_type()).encode();
@@ -209,7 +210,11 @@ llvm::SmallVector<llvm::Value*> JeandleVMState::deopt_args(llvm::IRBuilder<>& bu
         DeoptValueEncoding::decode(encode).print();
       }
 #endif
-      args.push_back(builder.getInt64(encode));
+      if ((uint32_t)encode == encode) {
+        args.push_back(builder.getInt32((uint32_t)encode));
+      } else {
+        args.push_back(builder.getInt64(encode));
+      }
       args.push_back(_locals[i].value());
       if (is_double_word_type(_locals[i].computational_type())) {
         i++;

@@ -61,11 +61,12 @@ public:
     assert(_value_type == LocalType || _value_type == StackType || _value_type == MonitorType, "Unsupported value type");
   }
 
-  uint64_t encode() {
+  uint64_t encode() const {
     // encode format
     // |--- index ---|--- value_type ---|--- basic_type ---|
     // |0          31|32              47|48              63|
-    return ((uint64_t)_index << 32) | ((uint64_t)(_value_type << 16)) | (uint64_t)(_basic_type);
+    //assert(_basic_type != T_BYTE && _basic_type != T_SHORT && _basic_type != T_BOOLEAN, "must be");
+    return ((uint64_t)_index << 32) | (((uint64_t)_value_type << 16) & 0xffff0000UL) | ((uint64_t)_basic_type & 0xffffUL);
   }
 
   static DeoptValueEncoding decode(uint64_t encode) {
@@ -74,7 +75,7 @@ public:
     int val_type = (int)((encode & 0xffff0000UL) >> 16);
     assert(val_type >= 0 && val_type < DeoptValueType::LastType, "must be");
     int basic_type = (int)((encode & 0xffffUL));
-    assert(basic_type >= 0 && basic_type <= BasicType::T_ILLEGAL, "must be");
+    assert(basic_type >= 0 && basic_type <= BasicType::T_ILLEGAL, "must be, realVal: %d", basic_type);
     return {index, (DeoptValueType)(val_type), (BasicType)(basic_type)};
   }
 

@@ -68,14 +68,17 @@ class JeandleType : public AllStatic {
       case T_BOOLEAN:
       case T_INT    :
         return T_INT;
+        break;
       case T_VOID   :
       case T_LONG   :
       case T_FLOAT  :
       case T_DOUBLE :
         return bt;
+        break;
       case T_ARRAY  :
       case T_OBJECT :
         return T_OBJECT;
+        break;
       default       :
         ShouldNotReachHere();
     }

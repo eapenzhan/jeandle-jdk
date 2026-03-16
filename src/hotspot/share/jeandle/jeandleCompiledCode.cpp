@@ -483,6 +483,15 @@ void JeandleCompiledCode::resolve_reloc_info(JeandleAssembler& assembler) {
         call_info = _routine_call_sites[inst_end_offset];
       }
       if (call_info) {
+        #ifdef ASSERT
+        if (_method != nullptr) {
+          _method->print_short_name();
+          {
+            ttyLocker ttyl;
+            tty->print_cr("-------------------------------------");
+          }
+        }
+        #endif
         relocs.push_back(new JeandleCallReloc(inst_end_offset, _env, _method, parse_stackmap(stackmaps, record, call_info), call_info));
       }
     }
@@ -630,7 +639,18 @@ void JeandleCompiledCode::fill_one_scope_value(const StackMapParser& stackmaps,
     array->append(new LocationValue(Location()));
     break;
   }
+  case T_BYTE: {
+    if (is_constant) {
+      jint const_int = JeandleBitCast::bit_cast<jint>(StackMapUtil::getConstantUint(stackmaps, location));
+      array->append(new ConstantIntValue(const_int));
+    } else {
+      array->append(new_location_value(location, Location::normal));
+    }
+    break;
+  }
   default:
+    uint64_t xx = encode.encode();
+    fatal("Unimplemented type: %d, %lu", encode._basic_type, xx);
     Unimplemented();
   }
 }
@@ -686,11 +706,18 @@ JeandleStackMap* JeandleCompiledCode::parse_stackmap(StackMapParser& stackmaps, 
 
     num_deopts = third.getSmallConstant();
     assert(num_deopts > 0, "negative number");
+    assert(location != record->location_end(), "must be in range");
 
     // bci goes first in deopt operands
+    assert((*location).getKind() == StackMapParser::LocationKind::Constant, "unexpected kind");
     int bci = (location++)->getSmallConstant();
     num_deopts--;
+    int bci2 = (int)StackMapUtil::getConstantUlong(stackmaps, *location);
+    location++;
+    num_deopts--;
+    assert(bci == bci2, "must be");
     call_info->set_bci(bci);
+
 
     if (bci != InvocationEntryBci) {
       Bytecodes::Code code = _method->java_code_at_bci(bci);
@@ -707,6 +734,8 @@ JeandleStackMap* JeandleCompiledCode::parse_stackmap(StackMapParser& stackmaps, 
     // monitor deopt arguments are passed as a tuple: <encode, object, lock>
     assert(location != record->location_end(), "must be in range");
     auto encode_location = *(location++);
+    assert(encode_location.getKind() == StackMapParser::LocationKind::Constant || 
+       encode_location.getKind() == StackMapParser::LocationKind::ConstantIndex, "unexpected kind");
 
     uint64_t encode = StackMapUtil::getConstantUlong(stackmaps, encode_location);
     DeoptValueEncoding enc = DeoptValueEncoding::decode(encode);
@@ -777,6 +806,12 @@ JeandleStackMap* JeandleCompiledCode::parse_stackmap(StackMapParser& stackmaps, 
       oop_map->set_derived_oop(reg_derived, reg_base);
     }
   }
+  #ifdef ASSERT
+  {
+    ttyLocker ttyl;
+    tty->flush();
+  }
+  #endif
   return new JeandleStackMap(oop_map, locals, stack, monitors, reexecute);
 }
 
