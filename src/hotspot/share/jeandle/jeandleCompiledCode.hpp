@@ -42,6 +42,7 @@
 #include "ci/ciField.hpp"
 #include "ci/ciMethod.hpp"
 #include "code/exceptionHandlerTable.hpp"
+#include "runtime/basicLock.hpp"
 #include "runtime/sharedRuntime.hpp"
 
 
@@ -180,6 +181,7 @@ class JeandleCompiledCode : public StackObj {
                       _method(method),
                       _routine_entry(nullptr),
                       _func_name(JeandleFuncSig::method_name_with_signature(_method)),
+                      _max_lock_depth(0),
                       _interpreter_frame_size_in_bytes(0) {}
 
   // For compiled Jeandle runtime stubs.
@@ -193,6 +195,7 @@ class JeandleCompiledCode : public StackObj {
                       _method(nullptr),
                       _routine_entry(nullptr),
                       _func_name(func_name),
+                      _max_lock_depth(0),
                       _interpreter_frame_size_in_bytes(0) {}
 
   void install_obj(std::unique_ptr<ObjectBuffer> obj);
@@ -214,6 +217,7 @@ class JeandleCompiledCode : public StackObj {
   ImplicitExceptionTable* implicit_exception_table() { return &_implicit_exception_table; }
 
   int frame_size() const { return _frame_size; }
+  int orig_pc_offset_in_bytes() const;
 
   address routine_entry() const { return _routine_entry; }
   void set_routine_entry(address entry) { _routine_entry = entry; }
@@ -225,6 +229,7 @@ class JeandleCompiledCode : public StackObj {
   bool needs_clinit_barrier(ciMethod* ik,        ciMethod* accessing_method);
   bool needs_clinit_barrier(ciInstanceKlass* ik, ciMethod* accessing_method);
   bool needs_clinit_barrier_on_entry();
+  void update_max_lock_depth(int depth) { _max_lock_depth = MAX2(_max_lock_depth, depth); }
   void update_interpreter_frame_size_in_bytes(int frame_size) { _interpreter_frame_size_in_bytes = MAX2(frame_size, _interpreter_frame_size_in_bytes); }
   int interpreter_frame_size_in_bytes() { return _interpreter_frame_size_in_bytes; }
 
@@ -253,6 +258,7 @@ class JeandleCompiledCode : public StackObj {
   ciMethod* _method;
   address _routine_entry;
   std::string _func_name;
+  int _max_lock_depth;
   int _interpreter_frame_size_in_bytes;
 
   void setup_frame_size();

@@ -202,6 +202,7 @@ void JeandleVMState::store(BasicType type, int index, llvm::Value* value) {
 
 llvm::SmallVector<llvm::Value*> JeandleVMState::deopt_args(llvm::IRBuilder<>& builder, int bci) {
   llvm::SmallVector<llvm::Value*> args;
+  JeandleCompilation::current()->compiled_code()->update_max_lock_depth((int)_locks.size());
   // |--- bci ---|--- locals ---|--- stack ---|--- monitor ---|
   /* TODO: scalar */
   args.push_back(builder.getInt32(bci));

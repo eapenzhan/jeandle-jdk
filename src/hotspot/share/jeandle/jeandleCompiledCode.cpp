@@ -872,6 +872,18 @@ int JeandleCompiledCode::frame_size_in_slots() {
   return _frame_size * sizeof(intptr_t) / VMRegImpl::stack_slot_size;
 }
 
+int JeandleCompiledCode::orig_pc_offset_in_bytes() const {
+  // Match the fixed stack-slot layout used by HotSpot compilers: monitor slots
+  // live below the preserved incoming frame area, and the orig_pc slot follows.
+  int lock_bytes = _max_lock_depth * (int)sizeof(BasicLock);
+  int reg_map_bytes = (int)(SharedRuntime::in_preserve_stack_slots() * VMRegImpl::stack_slot_size);
+  int offset = lock_bytes + reg_map_bytes;
+  assert(offset >= 0, "sanity");
+  assert(offset + (int)sizeof(address) <= _frame_size * BytesPerWord,
+         "orig pc slot out of frame: offset=%d frame=%d", offset, _frame_size * BytesPerWord);
+  return offset;
+}
+
 uint32_t StackMapUtil::getConstantUint(const StackMapParser& parser, const StackMapParser::LocationAccessor& location) {
   switch (location.getKind()) {
     case StackMapParser::LocationKind::Constant:
