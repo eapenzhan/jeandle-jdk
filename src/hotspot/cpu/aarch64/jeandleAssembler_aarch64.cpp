@@ -214,6 +214,22 @@ int JeandleAssembler::emit_exception_handler() {
   return offset;
 }
 
+int JeandleAssembler::deopt_handler_size() {
+  return 7 * NativeInstruction::instruction_size;
+}
+
+int JeandleAssembler::emit_deopt_handler() {
+  int stub_size = deopt_handler_size();
+  address base = __ start_a_stub(stub_size);
+  JEANDLE_ERROR_ASSERT_AND_RET_ON_FAIL(base != nullptr, "deopt handler stub overflow", 0);
+  int offset = __ offset();
+  __ adr(lr, __ pc());
+  __ far_jump(RuntimeAddress(JeandleRuntimeRoutine::get_routine_entry(JeandleRuntimeRoutine::_deopt_blob)));
+  assert(__ offset() - offset <= stub_size, "overflow");
+  __ end_a_stub();
+  return offset;
+}
+
 using LinkKind_aarch64 = llvm::jitlink::aarch64::EdgeKind_aarch64;
 
 void JeandleAssembler::emit_section_word_reloc(int operand_offset, LinkKind kind, int64_t addend, address target, int reloc_section) {

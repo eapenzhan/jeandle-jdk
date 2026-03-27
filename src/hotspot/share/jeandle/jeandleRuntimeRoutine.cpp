@@ -61,6 +61,8 @@
 llvm::StringMap<address> JeandleRuntimeRoutine::_routine_entry;
 llvm::DenseSet<address> JeandleRuntimeRoutine::_gc_leaf_routines;
 
+DeoptimizationBlob* JeandleRuntimeRoutine::_raw_deopt_blob;
+
 bool JeandleRuntimeRoutine::generate(llvm::TargetMachine* target_machine, llvm::DataLayout* data_layout) {
   // For each indirect routine, compile a runtime stub to wrap it.
   ALL_JEANDLE_INDIRECT_ROUTINES(GEN_ROUTINE_STUB);

@@ -53,7 +53,7 @@ class Register {
    public:
     // accessors
     constexpr int raw_encoding() const { return checked_cast<int>(this - first()); }
-    constexpr int     encoding() const { assert(is_valid(), "invalid register"); return raw_encoding(); }
+    constexpr int     encoding() const { assert(is_valid(), "invalid register, name: %s", name()); return raw_encoding(); }
     constexpr bool    is_valid() const { return 0 <= raw_encoding() && raw_encoding() < number_of_registers; }
 
     // derived registers, offsets, and addresses

@@ -84,6 +84,13 @@ class Location {
     assert( offset() == offset_, "" );
   }
 
+  Location(Where where_, Type type_, unsigned offset_, VMReg& j_rg) {
+    set(where_, type_, offset_);
+    assert( where () == where_ , "" );
+    assert( type  () == type_  , "" );
+    assert( offset() == offset_, "" );
+  }
+
   inline void set(Where where_, Type type_, unsigned offset_) {
     _value = (juint) ((where_  << WHERE_SHIFT) |
                       (type_   << TYPE_SHIFT)  |
@@ -91,9 +98,9 @@ class Location {
   }
 
  public:
-
   // Stack location Factory.  Offset is 4-byte aligned; remove low bits
   static Location new_stk_loc( Type t, int offset ) { return Location(on_stack,t,offset>>LogBytesPerInt); }
+  static Location new_stk_loc( Type t, int offset, VMReg j_rg) { return Location(on_stack,t,offset>>LogBytesPerInt, j_rg); }
   // Register location Factory
   static Location new_reg_loc( Type t, VMReg reg ) { return Location(in_register, t, reg->value()); }
   // Default constructor

@@ -187,6 +187,23 @@ int JeandleAssembler::emit_exception_handler() {
   return offset;
 }
 
+int JeandleAssembler::deopt_handler_size() {
+  return 17;
+}
+
+int JeandleAssembler::emit_deopt_handler() {
+  address base = __ start_a_stub(deopt_handler_size());
+  JEANDLE_ERROR_ASSERT_AND_RET_ON_FAIL(base != nullptr, "deopt handler stub overflow", 0);
+  int offset = __ offset();
+  InternalAddress here(__ pc());
+
+  __ pushptr(here.addr(), rscratch1);
+  __ jump(RuntimeAddress(JeandleRuntimeRoutine::get_routine_entry(JeandleRuntimeRoutine::_deopt_blob)));
+  assert(__ offset() - offset <= deopt_handler_size(), "overflow");
+  __ end_a_stub();
+  return offset;
+}
+
 using LinkKind_x86_64 = llvm::jitlink::x86_64::EdgeKind_x86_64;
 
 void JeandleAssembler::emit_section_word_reloc(int operand_offset, LinkKind kind, int64_t addend, address target, int reloc_section) {

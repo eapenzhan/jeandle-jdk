@@ -132,10 +132,10 @@ static oop oop_from_narrowOop_location(stackChunkOop chunk, void* addr, bool is_
   return val;
 }
 
-StackValue* StackValue::create_stack_value_from_oop_location(stackChunkOop chunk, void* addr) {
+StackValue* StackValue::create_stack_value_from_oop_location(stackChunkOop chunk, void* addr, bool is_register) {
   oop val = oop_from_oop_location(chunk, addr);
-  assert(oopDesc::is_oop_or_null(val), "bad oop found at " INTPTR_FORMAT " in_cont: %d compressed: %d",
-         p2i(addr), chunk != nullptr, chunk != nullptr && chunk->has_bitmap() && UseCompressedOops);
+  assert(oopDesc::is_oop_or_null(val), "bad oop found at " INTPTR_FORMAT " in_cont: %d compressed: %d, isRegister: %d",
+         p2i(addr), chunk != nullptr, chunk != nullptr && chunk->has_bitmap() && UseCompressedOops, is_register);
   Handle h(Thread::current(), val); // Wrap a handle around the oop
   return new StackValue(h);
 }
@@ -200,7 +200,7 @@ StackValue* StackValue::create_stack_value(ScopeValue* sv, address value_addr, c
       return create_stack_value_from_narrowOop_location(reg_map->stack_chunk()(), (void*)value_addr, loc.is_register());
 #endif
     case Location::oop:
-      return create_stack_value_from_oop_location(reg_map->stack_chunk()(), (void*)value_addr);
+      return create_stack_value_from_oop_location(reg_map->stack_chunk()(), (void*)value_addr, loc.is_register());
     case Location::addr: {
       loc.print_on(tty);
       ShouldNotReachHere(); // both C1 and C2 now inline jsrs
@@ -273,12 +273,28 @@ address StackValue::stack_value_address(const frame* fr, const RegisterMapT* reg
   }
 
   if (!reg_map->in_cont()) {
-    address value_addr = loc.is_register()
+    address value_addr = nullptr;
+    if (loc.is_register()) {
       // Value was in a callee-save register
-      ? reg_map->location(VMRegImpl::as_VMReg(loc.register_number()), fr->sp())
+      value_addr = reg_map->location(VMRegImpl::as_VMReg(loc.register_number()), fr->sp());
+    } else {
       // Else value was directly saved on the stack. The frame's original stack pointer,
       // before any extension by its callee (due to Compiler1 linkage on SPARC), must be used.
-      : ((address)fr->unextended_sp()) + loc.stack_offset();
+       value_addr = ((address)fr->unextended_sp()) + loc.stack_offset();
+#ifdef ASSERT
+      if (fr->is_jeandle_compiled_frame()) {
+        JavaThread* current_thread = JavaThread::current();
+        frame deopt_fr = current_thread->last_frame();
+        fr->print_value_on(tty, current_thread);
+        deopt_fr.print_value_on(tty, current_thread);
+      }
+#endif
+    }
+    if (!loc.is_register() && log_is_enabled(Trace, jeandle)) {
+      ttyLocker ttyl;
+      tty->print_cr("stack_value_address: %p, thread: %s", value_addr, reg_map->thread()->name());
+    }
+
 
     assert(value_addr == nullptr || reg_map->thread() == nullptr || reg_map->thread()->is_in_usable_stack(value_addr), INTPTR_FORMAT, p2i(value_addr));
     return value_addr;

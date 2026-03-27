@@ -106,10 +106,12 @@ class CallSiteInfo : public JeandleCompilationResourceObj {
   CallSiteInfo(JeandleCompiledCall::Type type,
                address target,
                int bci,
+               bool is_method_handle_invoke = false,
                uint64_t statepoint_id = llvm::StatepointDirectives::DefaultStatepointID) :
                _type(type),
                _target(target),
                _bci(bci),
+               _is_method_handle_invoke(is_method_handle_invoke),
                _statepoint_id(statepoint_id) {
 #ifdef ASSERT
     // We don't need to assign a unique statepoint id for each routine call site, only call type and target is used.
@@ -127,11 +129,13 @@ class CallSiteInfo : public JeandleCompilationResourceObj {
   JeandleCompiledCall::Type type() const { return _type; }
   uint64_t statepoint_id() const { return _statepoint_id; }
   address target() const { return _target; }
+  bool is_method_handle_invoke() const { return _is_method_handle_invoke; }
 
  private:
   JeandleCompiledCall::Type _type;
   address _target;
   int _bci;
+  bool _is_method_handle_invoke;
 
   // Used to distinguish each call site in stackmaps.
   uint64_t _statepoint_id;
@@ -180,7 +184,8 @@ class JeandleCompiledCode : public StackObj {
                       _method(method),
                       _routine_entry(nullptr),
                       _func_name(JeandleFuncSig::method_name_with_signature(_method)),
-                      _interpreter_frame_size_in_bytes(0) {}
+                      _interpreter_frame_size_in_bytes(0),
+                      _has_method_handle_invoke(false) {}
 
   // For compiled Jeandle runtime stubs.
   JeandleCompiledCode(ciEnv* env, const char* func_name) :
@@ -193,7 +198,8 @@ class JeandleCompiledCode : public StackObj {
                       _method(nullptr),
                       _routine_entry(nullptr),
                       _func_name(func_name),
-                      _interpreter_frame_size_in_bytes(0) {}
+                      _interpreter_frame_size_in_bytes(0),
+                      _has_method_handle_invoke(false) {}
 
   void install_obj(std::unique_ptr<ObjectBuffer> obj);
 
@@ -214,6 +220,8 @@ class JeandleCompiledCode : public StackObj {
   ImplicitExceptionTable* implicit_exception_table() { return &_implicit_exception_table; }
 
   int frame_size() const { return _frame_size; }
+
+  void set_has_method_handle_invoke(bool z) { _has_method_handle_invoke = z;}
 
   address routine_entry() const { return _routine_entry; }
   void set_routine_entry(address entry) { _routine_entry = entry; }
@@ -254,6 +262,7 @@ class JeandleCompiledCode : public StackObj {
   address _routine_entry;
   std::string _func_name;
   int _interpreter_frame_size_in_bytes;
+  bool _has_method_handle_invoke;
 
   void setup_frame_size();
 
@@ -285,26 +294,21 @@ public:
   }
 
   static bool is_stack(const StackMapParser::LocationAccessor& location) {
-    return location.getKind() == StackMapParser::LocationKind::Indirect
-        || location.getKind() == StackMapParser::LocationKind::Direct;
+    return location.getKind() == StackMapParser::LocationKind::Indirect;
   }
 
   static bool is_register(const StackMapParser::LocationAccessor& location) {
     return location.getKind() == StackMapParser::LocationKind::Register;
   }
 
-  static int32_t stack_offset(const StackMapParser::LocationAccessor& location) {
-    if (is_stack(location)) {
-      return location.getOffset();
-    } else {
-      ShouldNotReachHere();
-    }
-  }
-
   static uint32_t getConstantUint(const StackMapParser& parser, const StackMapParser::LocationAccessor& location);
   static uint64_t getConstantUlong(const StackMapParser& parser, const StackMapParser::LocationAccessor& location);
   static float    getConstantFloat(const StackMapParser& parser, const StackMapParser::LocationAccessor& location);
   static double   getConstantDouble(const StackMapParser& parser, const StackMapParser::LocationAccessor& location);
+
+  static int32_t stack_offset(const StackMapParser::LocationAccessor& location) {
+    return location.getOffset();
+  }
 };
 
 #endif // SHARE_JEANDLE_COMPILED_CODE_HPP

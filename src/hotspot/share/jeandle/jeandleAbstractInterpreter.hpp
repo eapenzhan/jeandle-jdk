@@ -35,6 +35,7 @@
 #include "jeandle/__hotspotHeadersBegin__.hpp"
 #include "ci/ciMethodBlocks.hpp"
 #include "ci/compilerInterface.hpp"
+#include "logging/log.hpp"
 #include "memory/allocation.hpp"
 #include "memory/universe.hpp"
 #include "utilities/bitMap.inline.hpp"
@@ -327,6 +328,15 @@ class JeandleAbstractInterpreter : public StackObj {
                                    llvm::ArrayRef<llvm::OperandBundleDef> deopt_bundle = {});
 
   llvm::OperandBundleDef create_current_deopt_bundle() {
+#ifdef ASSERT
+    if (log_is_enabled(Trace, jeandle)) {
+      if(_method) {
+        ttyLocker ttyl;
+        _method->print_short_name();
+        tty->print_cr("-------");
+      }
+    }
+#endif
     return llvm::OperandBundleDef("deopt", _jvm->deopt_args(_ir_builder, _bytecodes.cur_bci()));
   }
 

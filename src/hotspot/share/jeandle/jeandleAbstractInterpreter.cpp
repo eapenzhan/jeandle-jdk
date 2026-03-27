@@ -233,6 +233,11 @@ llvm::SmallVector<llvm::Value*> JeandleVMState::deopt_args(llvm::IRBuilder<>& bu
   for (size_t i = 0; i < _stack.size(); i++) {
     if (!_stack[i].is_null()) {
       uint64_t encode = DeoptValueEncoding(i, DeoptValueEncoding::StackType, stack_computational_type_at(i)).encode();
+#ifdef ASSERT
+      if (log_is_enabled(Trace, jeandle)) {
+        DeoptValueEncoding::decode(encode).print();
+      }
+#endif
       args.push_back(builder.getInt64(encode));
       args.push_back(_stack[i].value());
       if (is_double_word_type(stack_computational_type_at(i))) {
@@ -241,6 +246,11 @@ llvm::SmallVector<llvm::Value*> JeandleVMState::deopt_args(llvm::IRBuilder<>& bu
     } else {
       // replace with {T_ILLEGAL, 0}
       uint64_t encode = DeoptValueEncoding(i, DeoptValueEncoding::StackType, T_ILLEGAL).encode();
+#ifdef ASSERT
+      if (log_is_enabled(Trace, jeandle)) {
+        DeoptValueEncoding::decode(encode).print();
+      }
+#endif
       args.push_back(builder.getInt64(encode));
       args.push_back(builder.getInt32(0));
     }
@@ -1332,6 +1342,14 @@ void JeandleAbstractInterpreter::invoke() {
     null_check(receiver_value);
   }
 
+  // JSR 292
+  // Preserve the SP over MethodHandle call sites, if needed.
+  bool is_method_handle_invoke = (target->is_method_handle_intrinsic() ||
+                                  target->is_compiled_lambda_form());
+  if (is_method_handle_invoke) {
+    _compiled_code.set_has_method_handle_invoke(true);
+  }
+
   // try inline callee as intrinsic
   if (target->is_loaded()
     && target->check_intrinsic_candidate()
@@ -1468,7 +1486,7 @@ void JeandleAbstractInterpreter::invoke() {
 
   // Record this call.
   uint32_t id = _compiled_code.next_statepoint_id();
-  _compiled_code.push_non_routine_call_site(new CallSiteInfo(call_type, dest, _bytecodes.cur_bci(), id));
+  _compiled_code.push_non_routine_call_site(new CallSiteInfo(call_type, dest, _bytecodes.cur_bci(), is_method_handle_invoke, id));
 
   // Every invoke instruction may throw exceptions, handle them here.
   DispatchedDest dispatched = dispatch_exception_for_invoke();

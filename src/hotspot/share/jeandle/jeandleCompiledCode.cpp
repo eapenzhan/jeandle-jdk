@@ -187,7 +187,7 @@ class JeandleCallReloc : public JeandleReloc {
                              _call->bci(),
                              _stack_map->reexecute(),
                              false,
-                             false,
+                             _call->is_method_handle_invoke(),
                              false,
                              false,
                              false,
@@ -381,8 +381,15 @@ void JeandleCompiledCode::finalize() {
 
   build_implicit_exception_table();
 
-  // TODO: generate code for deopt handler.
-  _offsets.set_value(CodeOffsets::Deopt, masm->offset());
+  // generate code for deopt handler.
+  if (_method) {
+    _offsets.set_value(CodeOffsets::Deopt, assembler.emit_deopt_handler());
+    RETURN_VOID_ON_JEANDLE_ERROR();
+    if (_has_method_handle_invoke) {
+      _offsets.set_value(CodeOffsets::DeoptMH, assembler.emit_deopt_handler());
+      RETURN_VOID_ON_JEANDLE_ERROR();
+    }
+  }
 }
 
 void JeandleCompiledCode::resolve_reloc_info(JeandleAssembler& assembler) {
@@ -546,7 +553,7 @@ static VMReg resolve_vmreg(const StackMapParser::LocationAccessor& location, Sta
   if (kind == StackMapParser::LocationKind::Register) {
     Register reg = JeandleRegister::decode_dwarf_register(location.getDwarfRegNum());
     return reg->as_VMReg();
-  } else if (kind == StackMapParser::LocationKind::Indirect) {
+  } else if (kind == StackMapParser::LocationKind::Direct || kind == StackMapParser::LocationKind::Indirect) {
 #ifdef ASSERT
     Register reg = JeandleRegister::decode_dwarf_register(location.getDwarfRegNum());
     assert(JeandleRegister::is_stack_pointer(reg), "register of indirect kind must be stack pointer");
@@ -564,9 +571,21 @@ static VMReg resolve_vmreg(const StackMapParser::LocationAccessor& location, Sta
 }
 
 LocationValue* JeandleCompiledCode::new_location_value(const StackMapParser::LocationAccessor& location, Location::Type type) {
-  return StackMapUtil::is_stack(location)
-    ? new LocationValue(Location::new_stk_loc(type, StackMapUtil::stack_offset(location)))
-    : new LocationValue(Location::new_reg_loc(type, resolve_vmreg(location, location.getKind())));
+  switch (location.getKind()) {
+    case StackMapParser::LocationKind::Indirect: {
+      Register reg = JeandleRegister::decode_dwarf_register(location.getDwarfRegNum());
+      assert(reg == r31_sp, "must be");
+      return new LocationValue(Location::new_stk_loc(type, StackMapUtil::stack_offset(location)));
+      break;
+    }
+    case StackMapParser::LocationKind::Direct: // Treat as an addr on stack. see code FrameMap::regname in c1_FrameMap.cpp
+    case StackMapParser::LocationKind::Register: {
+      return new LocationValue(Location::new_reg_loc(type, resolve_vmreg(location, location.getKind())));
+      break;
+    }
+    default:
+      ShouldNotReachHere();
+  }
 }
 
 void JeandleCompiledCode::fill_one_scope_value(const StackMapParser& stackmaps,
@@ -704,6 +723,13 @@ JeandleStackMap* JeandleCompiledCode::parse_stackmap(StackMapParser& stackmaps, 
   GrowableArray<ScopeValue*>* locals = num_deopts > 0 ? new GrowableArray<ScopeValue*>(_method->max_locals()) : nullptr;
   GrowableArray<ScopeValue*>* stack  = num_deopts > 0 ? new GrowableArray<ScopeValue*>(_method->max_stack()) : nullptr;
   GrowableArray<MonitorValue*>* monitors = num_deopts > 0 ? new GrowableArray<MonitorValue*>() : nullptr;
+
+#ifdef ASSERT
+  if (log_is_enabled(Trace, jeandle) && num_deopts > 0) {
+    ttyLocker ttyl;
+    tty->print_cr("--------parse deopt args --------");
+  }
+#endif
   while (num_deopts > 0) {
     // local and stack deopt arguments are passed as a pair: <encode, value>
     // monitor deopt arguments are passed as a tuple: <encode, object, lock>
