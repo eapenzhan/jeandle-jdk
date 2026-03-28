@@ -192,8 +192,14 @@ void JeandleCompiledCode::finalize() {
 
   build_implicit_exception_table();
 
-  // TODO: generate code for deopt handler.
-  _offsets.set_value(CodeOffsets::Deopt, masm->offset());
+  if (_method) {
+    _offsets.set_value(CodeOffsets::Deopt, assembler.emit_deopt_handler());
+    JEANDLE_REPORT_ERROR_AND_RET_VOID("deopt handler stub overflow");
+    if (_has_method_handle_invoke) {
+      _offsets.set_value(CodeOffsets::DeoptMH, assembler.emit_deopt_handler());
+      JEANDLE_REPORT_ERROR_AND_RET_VOID("deopt handler stub overflow");
+    }
+  }
 }
 
 void JeandleCompiledCode::resolve_reloc_info(JeandleAssembler& assembler) {
@@ -498,6 +504,9 @@ JeandleStackMap* JeandleCompiledCode::parse_stackmap(StackMapParser& stackmaps, 
   assert(third.getKind() == StackMapParser::LocationKind::Constant, "unexpected kind");
 
   int num_deopts = third.getSmallConstant();
+  if (num_deopts > 0) {
+    _needs_orig_pc_offset = true;
+  }
   bool reexecute = false;
   if (num_deopts > 0) {
     assert(this->_method != nullptr, "must be method compilation");
@@ -505,7 +514,9 @@ JeandleStackMap* JeandleCompiledCode::parse_stackmap(StackMapParser& stackmaps, 
     // bci goes first in deopt operands
     int bci = (location++)->getSmallConstant();
     num_deopts--;
-    call_info->set_bci(bci);
+    if (call_info != nullptr) {
+      call_info->set_bci(bci);
+    }
 
     if (bci != InvocationEntryBci) {
       Bytecodes::Code code = _method->java_code_at_bci(bci);
@@ -554,6 +565,14 @@ JeandleStackMap* JeandleCompiledCode::parse_stackmap(StackMapParser& stackmaps, 
 
         fill_one_monitor_value(stackmaps, enc, obj_location, lock_location, monitors);
         num_deopts -= 3;
+        break;
+      }
+      case DeoptValueEncoding::OrigPcSlotType: {
+        assert(location != record->location_end(), "must be in range");
+        auto orig_pc_location = *(location++);
+        assert(StackMapUtil::is_stack(orig_pc_location), "orig pc slot must be stack allocated");
+        set_real_orig_pc_offset_in_bytes(StackMapUtil::stack_offset(orig_pc_location));
+        num_deopts -= 2;
         break;
       }
       default:
@@ -678,6 +697,23 @@ void JeandleCompiledCode::build_implicit_exception_table() {
 
 int JeandleCompiledCode::frame_size_in_slots() {
   return _frame_size * sizeof(intptr_t) / VMRegImpl::stack_slot_size;
+}
+
+void JeandleCompiledCode::set_real_orig_pc_offset_in_bytes(int offset) {
+  assert(offset >= 0, "sanity");
+  if (_orig_pc_offset_in_bytes == -1) {
+    _orig_pc_offset_in_bytes = offset;
+  } else {
+    assert(_orig_pc_offset_in_bytes == offset, "orig pc slot offset must be stable");
+  }
+}
+
+int JeandleCompiledCode::orig_pc_offset_in_bytes() const {
+  if (!_needs_orig_pc_offset) {
+    return 0;
+  }
+  assert(_orig_pc_offset_in_bytes >= 0, "orig pc slot offset must be resolved from stackmaps");
+  return _orig_pc_offset_in_bytes;
 }
 
 uint32_t StackMapUtil::getConstantUint(const StackMapParser& parser, const StackMapParser::LocationAccessor& location) {
