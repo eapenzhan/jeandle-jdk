@@ -303,6 +303,7 @@ class JeandleCompiledCode : public StackObj {
   void build_exception_handler_table();
   void build_implicit_exception_table();
 
+  int stub_size_estimate() const;
   int frame_size_in_slots();
 };
 

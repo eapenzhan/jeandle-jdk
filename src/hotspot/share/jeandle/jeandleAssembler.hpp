@@ -48,7 +48,10 @@ class JeandleAssembler : public StackObj {
 
   int emit_exception_handler();
   int emit_deopt_handler();
-  int deopt_handler_size();
+
+  static int call_stub_size();
+  static int exception_handler_size();
+  static int deopt_handler_size();
 
   void emit_insts(address code_start, uint64_t code_size);
 

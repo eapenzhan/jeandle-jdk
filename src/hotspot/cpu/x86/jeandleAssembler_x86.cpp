@@ -31,12 +31,20 @@
 
 #define __ _masm->
 
+int JeandleAssembler::call_stub_size() {
+  return 28;
+}
+
+int JeandleAssembler::exception_handler_size() {
+  return DEBUG_ONLY(1 * K) NOT_DEBUG(175);
+}
+
 void JeandleAssembler::emit_static_call_stub(int inst_offset, CallSiteInfo* call) {
   assert(inst_offset >= 0, "invalid call instruction address");
   assert(call->type() == JeandleCompiledCall::STATIC_CALL, "legal call type");
   address call_address = __ addr_at(inst_offset);
 
-  int stub_size = 28;
+  int stub_size = call_stub_size();
   address stub = __ start_a_stub(stub_size);
   if (stub == nullptr) {
     JEANDLE_REPORT_ERROR_AND_RET_VOID("static call stub overflow");

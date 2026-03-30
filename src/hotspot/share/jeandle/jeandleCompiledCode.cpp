@@ -326,7 +326,7 @@ void JeandleCompiledCode::finalize() {
   // TODO: How to figure out memory usage.
   _code_buffer.initialize(code_size + consts_size + 2048/* for prolog */,
                           sizeof(relocInfo) + relocInfo::length_limit,
-                          128,
+                          stub_size_estimate(),
                           _env->oop_recorder());
   if (_code_buffer.blob() == nullptr) {
     JEANDLE_REPORT_ERROR_AND_RET_VOID("CodeCache is full");
@@ -393,6 +393,43 @@ void JeandleCompiledCode::finalize() {
       JEANDLE_REPORT_ERROR_AND_RET_VOID("deopt handler stub overflow");
     }
   }
+}
+
+int JeandleCompiledCode::stub_size_estimate() const {
+  if (_method == nullptr) {
+    return 0;
+  }
+
+  int call_count = _non_routine_call_sites.size();
+
+  auto ssp = std::make_shared<llvm::orc::SymbolStringPool>();
+  auto graph_or_err = llvm::jitlink::createLinkGraphFromObject(_obj->getMemoryBufferRef(), ssp);
+  if (graph_or_err) {
+    std::unique_ptr<llvm::jitlink::LinkGraph> link_graph = std::move(*graph_or_err);
+    for (auto* block : link_graph->blocks()) {
+      if (block->getSection().getName().compare(".text") != 0) {
+        continue;
+      }
+      for (auto& edge : block->edges()) {
+        auto& target = edge.getTarget();
+        if (JeandleAssembler::is_routine_call_reloc(target, edge.getKind()) ||
+            JeandleAssembler::is_external_call_reloc(target, edge.getKind())) {
+          call_count++;
+        }
+      }
+    }
+  } else {
+    // Keep some slack even if the pre-scan fails; resolve_reloc_info() will
+    // diagnose the real ELF parsing error later.
+    call_count += 8;
+  }
+
+  // Reserve enough room for all patched call stubs plus the fixed handlers at
+  // the end of the stub section. This mirrors the way C1 sizes its stub area.
+  int handler_count = _has_method_handle_invoke ? 2 : 1;
+  return call_count * JeandleAssembler::call_stub_size() +
+         JeandleAssembler::exception_handler_size() +
+         handler_count * JeandleAssembler::deopt_handler_size();
 }
 
 void JeandleCompiledCode::resolve_reloc_info(JeandleAssembler& assembler) {
