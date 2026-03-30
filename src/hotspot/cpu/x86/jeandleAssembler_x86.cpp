@@ -204,7 +204,7 @@ int JeandleAssembler::emit_deopt_handler() {
   InternalAddress here(__ pc());
   __ pushptr(here.addr(), rscratch1);
   __ jump(RuntimeAddress(JeandleRuntimeRoutine::get_routine_entry(JeandleRuntimeRoutine::_deopt_blob)));
-  assert(__ offset() - offset <= deopt_handler_size(), "overflow");
+  assert(__ offset() - offset <= deopt_handler_size(), "deopt handler stub overflow");
   __ end_a_stub();
   return offset;
 }

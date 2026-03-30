@@ -194,10 +194,10 @@ void JeandleCompiledCode::finalize() {
 
   if (_method) {
     _offsets.set_value(CodeOffsets::Deopt, assembler.emit_deopt_handler());
-    JEANDLE_REPORT_ERROR_AND_RET_VOID("deopt handler stub overflow");
+    RETURN_VOID_ON_JEANDLE_ERROR();
     if (_has_method_handle_invoke) {
       _offsets.set_value(CodeOffsets::DeoptMH, assembler.emit_deopt_handler());
-      JEANDLE_REPORT_ERROR_AND_RET_VOID("deopt handler stub overflow");
+      RETURN_VOID_ON_JEANDLE_ERROR();
     }
   }
 }
