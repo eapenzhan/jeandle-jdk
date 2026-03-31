@@ -185,7 +185,9 @@ int JeandleAssembler::interior_entry_alignment() const {
 
 int JeandleAssembler::emit_exception_handler() {
   address base = __ start_a_stub(NativeJump::instruction_size);
-  JEANDLE_ERROR_ASSERT_AND_RET_ON_FAIL(base != nullptr, "exception handler stub overflow", 0);
+  if (base == nullptr) {
+    JEANDLE_REPORT_ERROR_AND_RET("exception handler stub overflow", 0);
+  }
   int offset = __ offset();
   __ jump(RuntimeAddress(JeandleRuntimeRoutine::get_routine_entry(JeandleRuntimeRoutine::_exception_handler)));
   assert(__ offset() - offset <= (int)NativeJump::instruction_size, "overflow");
@@ -199,7 +201,9 @@ int JeandleAssembler::deopt_handler_size() {
 
 int JeandleAssembler::emit_deopt_handler() {
   address base = __ start_a_stub(deopt_handler_size());
-  JEANDLE_ERROR_ASSERT_AND_RET_ON_FAIL(base != nullptr, "deopt handler stub overflow", 0);
+  if (base == nullptr) {
+    JEANDLE_REPORT_ERROR_AND_RET("deopt handler stub overflow", 0);
+  }
   int offset = __ offset();
   InternalAddress here(__ pc());
   __ pushptr(here.addr(), rscratch1);

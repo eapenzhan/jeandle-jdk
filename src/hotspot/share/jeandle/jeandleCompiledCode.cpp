@@ -131,7 +131,7 @@ void JeandleCompiledCode::finalize() {
   // TODO: How to figure out memory usage.
   _code_buffer.initialize(code_size + consts_size + 2048/* for prolog */,
                           sizeof(relocInfo) + relocInfo::length_limit,
-                          128,
+                          160,
                           _env->oop_recorder());
   if (_code_buffer.blob() == nullptr) {
     JEANDLE_REPORT_ERROR_AND_RET_VOID("CodeCache is full");
