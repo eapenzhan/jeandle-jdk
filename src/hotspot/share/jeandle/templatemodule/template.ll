@@ -62,6 +62,7 @@
 ; Global vm options
 @VMOptions.UseTLAB = external global i1
 @VMOptions.ZeroTLAB = external global i1
+@java_lang_ref_Reference.referent_offset = external global i32
 
 ; Byte offsets for BasicLock structure fields.
 @BasicLock.displaced_header_offset_in_bytes = external global i32

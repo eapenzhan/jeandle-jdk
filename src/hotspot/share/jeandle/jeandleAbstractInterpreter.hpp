@@ -41,6 +41,7 @@
 
 // Used by the abstract interpreter to trace JVM states.
 class JeandleBasicBlock;
+class JeandleIntrinsicLowering;
 class JeandleVMState : public JeandleCompilationResourceObj {
  public:
 
@@ -265,6 +266,9 @@ class JeandleAbstractInterpreter : public StackObj {
                              JeandleCompiledCode& code);
 
  private:
+  friend class JeandleIntrinsicLowering;
+  friend class JeandleIntrinsicIRSemantics;
+
   ciMethod* _method;
   llvm::Function* _llvm_func;
   int _entry_bci;
@@ -308,7 +312,7 @@ class JeandleAbstractInterpreter : public StackObj {
   void lookup_switch();
   void table_switch();
   void invoke();
-  bool inline_intrinsic(const ciMethod* target);
+  bool try_lower_intrinsic(const ciMethod* target);
   void stack_op(Bytecodes::Code code);
   void shift_op(BasicType type, Bytecodes::Code code);
   void checkcast();

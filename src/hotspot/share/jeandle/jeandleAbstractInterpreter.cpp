@@ -29,6 +29,9 @@
 
 #include "jeandle/jeandleAbstractInterpreter.hpp"
 #include "jeandle/jeandleCompiledCall.hpp"
+#include "jeandle/jeandleIntrinsicLowering.hpp"
+#include "jeandle/jeandleIntrinsicPolicy.hpp"
+#include "jeandle/jeandleIntrinsicRegistry.hpp"
 #include "jeandle/jeandleRuntimeRoutine.hpp"
 #include "jeandle/jeandleType.hpp"
 #include "jeandle/jeandleUtils.hpp"
@@ -1422,7 +1425,7 @@ void JeandleAbstractInterpreter::invoke() {
   // try inline callee as intrinsic
   if (target->is_loaded()
     && target->check_intrinsic_candidate()
-    && inline_intrinsic(target)) {
+    && try_lower_intrinsic(target)) {
     if (log_is_enabled(Debug, jeandle)) {
       ResourceMark rm;
       stringStream ss;
@@ -1603,103 +1606,20 @@ void JeandleAbstractInterpreter::invoke() {
   }
 }
 
-bool JeandleAbstractInterpreter::inline_intrinsic(const ciMethod* target) {
-  switch(target->intrinsic_id()) {
-    case vmIntrinsics::_dabs: {
-      _jvm->dpush(_ir_builder.CreateIntrinsic(JeandleType::java2llvm(BasicType::T_DOUBLE, *_context), llvm::Intrinsic::fabs, {_jvm->dpop()}));
-      break;
-    }
-    case vmIntrinsicID::_fabs: {
-      _jvm->fpush(_ir_builder.CreateIntrinsic(JeandleType::java2llvm(BasicType::T_FLOAT, *_context), llvm::Intrinsic::fabs, {_jvm->fpop()}));
-      break;
-    }
-    case vmIntrinsicID::_iabs: {
-      _jvm->ipush(_ir_builder.CreateIntrinsic(JeandleType::java2llvm(BasicType::T_INT, *_context), llvm::Intrinsic::abs, {_jvm->ipop(), _ir_builder.getInt1(false)}));
-      break;
-    }
-    case vmIntrinsicID::_labs: {
-      _jvm->lpush(_ir_builder.CreateIntrinsic(JeandleType::java2llvm(BasicType::T_LONG, *_context), llvm::Intrinsic::abs, {_jvm->lpop(), _ir_builder.getInt1(false)}));
-      break;
-    }
-    case vmIntrinsicID::_dsin: {
-      if (JeandleUseHotspotIntrinsics) {
-        llvm::FunctionCallee callee = StubRoutines::dsin() != nullptr ? JeandleRuntimeRoutine::StubRoutines_dsin_callee(_module) :
-                                                                        JeandleRuntimeRoutine::SharedRuntime_dsin_callee(_module);
-        _jvm->dpush(create_call(callee, {_jvm->dpop()}, llvm::CallingConv::C));
-      } else {
-        _jvm->dpush(_ir_builder.CreateIntrinsic(JeandleType::java2llvm(BasicType::T_DOUBLE, *_context), llvm::Intrinsic::sin, {_jvm->dpop()}));
-      }
-      break;
-    }
-    case vmIntrinsicID::_dcos: {
-      if (JeandleUseHotspotIntrinsics) {
-        llvm::FunctionCallee callee = StubRoutines::dcos() != nullptr ? JeandleRuntimeRoutine::StubRoutines_dcos_callee(_module) :
-                                                                        JeandleRuntimeRoutine::SharedRuntime_dcos_callee(_module);
-        _jvm->dpush(create_call(callee, {_jvm->dpop()}, llvm::CallingConv::C));
-      } else {
-        _jvm->dpush(_ir_builder.CreateIntrinsic(JeandleType::java2llvm(BasicType::T_DOUBLE, *_context), llvm::Intrinsic::cos, {_jvm->dpop()}));
-
-      }
-      break;
-    }
-    case vmIntrinsicID::_dtan: {
-      if (JeandleUseHotspotIntrinsics) {
-        llvm::FunctionCallee callee = StubRoutines::dtan() != nullptr ? JeandleRuntimeRoutine::StubRoutines_dtan_callee(_module) :
-                                                                        JeandleRuntimeRoutine::SharedRuntime_dtan_callee(_module);
-        _jvm->dpush(create_call(callee, {_jvm->dpop()}, llvm::CallingConv::C));
-      } else {
-        _jvm->dpush(_ir_builder.CreateIntrinsic(JeandleType::java2llvm(BasicType::T_DOUBLE, *_context), llvm::Intrinsic::tan, {_jvm->dpop()}));
-      }
-      break;
-    }
-    case vmIntrinsicID::_dlog: {
-      if (JeandleUseHotspotIntrinsics) {
-        llvm::FunctionCallee callee = StubRoutines::dlog() != nullptr ? JeandleRuntimeRoutine::StubRoutines_dlog_callee(_module) :
-                                                                        JeandleRuntimeRoutine::SharedRuntime_dlog_callee(_module);
-        _jvm->dpush(create_call(callee, {_jvm->dpop()}, llvm::CallingConv::C));
-      } else {
-        _jvm->dpush(_ir_builder.CreateIntrinsic(JeandleType::java2llvm(BasicType::T_DOUBLE, *_context), llvm::Intrinsic::log, {_jvm->dpop()}));
-      }
-      break;
-    }
-    case vmIntrinsicID::_dlog10: {
-      if (JeandleUseHotspotIntrinsics) {
-        llvm::FunctionCallee callee = StubRoutines::dlog10() != nullptr ? JeandleRuntimeRoutine::StubRoutines_dlog10_callee(_module) :
-                                                                        JeandleRuntimeRoutine::SharedRuntime_dlog10_callee(_module);
-        _jvm->dpush(create_call(callee, {_jvm->dpop()}, llvm::CallingConv::C));
-      } else {
-        _jvm->dpush(_ir_builder.CreateIntrinsic(JeandleType::java2llvm(BasicType::T_DOUBLE, *_context), llvm::Intrinsic::log10, {_jvm->dpop()}));
-      }
-      break;
-    }
-    case vmIntrinsicID::_dexp: {
-      if (JeandleUseHotspotIntrinsics) {
-        llvm::FunctionCallee callee = StubRoutines::dexp() != nullptr ? JeandleRuntimeRoutine::StubRoutines_dexp_callee(_module) :
-                                                                      JeandleRuntimeRoutine::SharedRuntime_dexp_callee(_module);
-        _jvm->dpush(create_call(callee, {_jvm->dpop()}, llvm::CallingConv::C));
-      } else {
-        _jvm->dpush(_ir_builder.CreateIntrinsic(JeandleType::java2llvm(BasicType::T_DOUBLE, *_context), llvm::Intrinsic::exp, {_jvm->dpop()}));
-      }
-      break;
-    }
-    case vmIntrinsicID::_dpow: {
-      // push the base first, then the exponent
-      // the pop order is reversed
-      llvm::Value *component = _jvm->dpop();
-      llvm::Value *base = _jvm->dpop();
-      if (JeandleUseHotspotIntrinsics) {
-        llvm::FunctionCallee callee = StubRoutines::dpow() != nullptr ? JeandleRuntimeRoutine::StubRoutines_dpow_callee(_module) : JeandleRuntimeRoutine::SharedRuntime_dpow_callee(_module);
-        _jvm->dpush(create_call(callee, {base, component}, llvm::CallingConv::C));
-      }
-      else {
-        _jvm->dpush(_ir_builder.CreateIntrinsic(JeandleType::java2llvm(BasicType::T_DOUBLE, *_context), llvm::Intrinsic::pow, {base, component}));
-      }
-      break;
-    }
-    default:
-      return false;
+bool JeandleAbstractInterpreter::try_lower_intrinsic(const ciMethod* target) {
+  const JeandleIntrinsicDescriptor* desc = JeandleIntrinsicRegistry::lookup(target);
+  if (desc == nullptr) {
+    return false;
   }
-  return true;
+
+  JeandleIntrinsicPolicy policy;
+  JeandleIntrinsicDecision decision = policy.decide(*desc, target);
+  if (!decision.supported) {
+    return false;
+  }
+
+  JeandleIntrinsicLowering lowering(this);
+  return lowering.lower(*desc, decision, target);
 }
 
 // Generate IR for calling into llvm FunctionCallee, without exception handling.
