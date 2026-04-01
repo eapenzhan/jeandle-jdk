@@ -214,11 +214,3 @@ void JeandleRuntimeRoutine::generate_exception_handler() {
 void JeandleRuntimeRoutine::generate_deopt_blob() {
   _routine_entry[_deopt_blob] = SharedRuntime::deopt_blob()->unpack();
 }
-
-void JeandleRuntimeRoutine::generate_deopt_blob_with_reexecution() {
-  _routine_entry[_deopt_blob_with_reexecution] = SharedRuntime::deopt_blob()->unpack_with_reexecution();
-}
-
-void JeandleRuntimeRoutine::generate_deopt_blob_with_exception() {
-  _routine_entry[_deopt_blob_with_exception] = SharedRuntime::deopt_blob()->unpack_with_exception();
-}

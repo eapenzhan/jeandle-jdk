@@ -192,7 +192,6 @@ class JeandleCompiledCode : public StackObj {
                       _orig_pc_slot(nullptr),
                       _orig_pc_offset_in_bytes(-1),
                       _interpreter_frame_size_in_bytes(0),
-                      _needs_orig_pc_offset(false),
                       _has_method_handle_invoke(false) {}
 
   // For compiled Jeandle runtime stubs.
@@ -209,7 +208,6 @@ class JeandleCompiledCode : public StackObj {
                       _orig_pc_slot(nullptr),
                       _orig_pc_offset_in_bytes(-1),
                       _interpreter_frame_size_in_bytes(0),
-                      _needs_orig_pc_offset(false),
                       _has_method_handle_invoke(false) {}
 
   void install_obj(std::unique_ptr<ObjectBuffer> obj);
@@ -278,7 +276,6 @@ class JeandleCompiledCode : public StackObj {
   llvm::Value* _orig_pc_slot;
   int _orig_pc_offset_in_bytes;
   int _interpreter_frame_size_in_bytes;
-  bool _needs_orig_pc_offset;
   bool _has_method_handle_invoke;
 
   void setup_frame_size();

@@ -504,9 +504,6 @@ JeandleStackMap* JeandleCompiledCode::parse_stackmap(StackMapParser& stackmaps, 
   assert(third.getKind() == StackMapParser::LocationKind::Constant, "unexpected kind");
 
   int num_deopts = third.getSmallConstant();
-  if (num_deopts > 0) {
-    _needs_orig_pc_offset = true;
-  }
   bool reexecute = false;
   if (num_deopts > 0) {
     assert(this->_method != nullptr, "must be method compilation");
@@ -514,9 +511,7 @@ JeandleStackMap* JeandleCompiledCode::parse_stackmap(StackMapParser& stackmaps, 
     // bci goes first in deopt operands
     int bci = (location++)->getSmallConstant();
     num_deopts--;
-    if (call_info != nullptr) {
-      call_info->set_bci(bci);
-    }
+    call_info->set_bci(bci);
 
     if (bci != InvocationEntryBci) {
       Bytecodes::Code code = _method->java_code_at_bci(bci);
@@ -709,10 +704,9 @@ void JeandleCompiledCode::set_real_orig_pc_offset_in_bytes(int offset) {
 }
 
 int JeandleCompiledCode::orig_pc_offset_in_bytes() const {
-  if (!_needs_orig_pc_offset) {
+  if (_needs_orig_pc_offset < 0) {
     return 0;
   }
-  assert(_orig_pc_offset_in_bytes >= 0, "orig pc slot offset must be resolved from stackmaps");
   return _orig_pc_offset_in_bytes;
 }
 

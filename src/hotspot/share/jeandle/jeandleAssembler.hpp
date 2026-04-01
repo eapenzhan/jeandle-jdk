@@ -47,6 +47,7 @@ class JeandleAssembler : public StackObj {
   void emit_clinit_barrier_on_entry(Klass* klass);
 
   int emit_exception_handler();
+
   int emit_deopt_handler();
   int deopt_handler_size();
 
