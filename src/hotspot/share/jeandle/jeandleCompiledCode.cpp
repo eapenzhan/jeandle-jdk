@@ -38,6 +38,7 @@
 #include "code/vmreg.inline.hpp"
 #include "interpreter/interpreter.hpp"
 #include "logging/log.hpp"
+#include "runtime/frame.hpp"
 #include "runtime/os.hpp"
 
 // Provide swap overload for JeandleReloc* to resolve ambiguity
@@ -193,6 +194,9 @@ void JeandleCompiledCode::finalize() {
   build_implicit_exception_table();
 
   if (_method) {
+    // OrigPCSlot is related to deopt. so added here
+    adjust_orig_pc_offset_in_bytes();
+
     _offsets.set_value(CodeOffsets::Deopt, assembler.emit_deopt_handler());
     RETURN_VOID_ON_JEANDLE_ERROR();
     if (_has_method_handle_invoke) {
@@ -297,6 +301,11 @@ void JeandleCompiledCode::resolve_reloc_info(JeandleAssembler& assembler) {
     for (auto record = stackmaps.records_begin(); record != stackmaps.records_end(); ++record) {
       assert(_prolog_length != -1, "prolog length must be initialized");
 
+      if (record->getID() == orig_pc_slot_anchor_id()) {
+        parse_orig_pc_slot_anchor(record);
+        continue;
+      }
+
       int inst_end_offset = static_cast<int>(record->getInstructionOffset());
       assert(inst_end_offset >=0, "invalid pc offset");
 
@@ -323,6 +332,19 @@ void JeandleCompiledCode::resolve_reloc_info(JeandleAssembler& assembler) {
     reloc->emit_reloc(assembler);
     RETURN_VOID_ON_JEANDLE_ERROR();
   }
+}
+
+void JeandleCompiledCode::parse_orig_pc_slot_anchor(StackMapParser::record_iterator& record) {
+  auto location = record->location_begin();
+  assert(location != record->location_end(), "orig pc anchor must carry one location");
+
+  auto orig_pc_location = *(location++);
+  assert(StackMapUtil::is_stack(orig_pc_location), "orig pc slot must be stack allocated");
+  Register reg = JeandleRegister::decode_dwarf_register(orig_pc_location.getDwarfRegNum());
+  assert(JeandleRegister::is_frame_pointer(reg), "base register of orig_pc addr must be fp");
+  _orig_pc_offset_in_bytes = StackMapUtil::stack_offset(orig_pc_location);
+
+  assert(location == record->location_end(), "orig pc anchor should only carry the slot location");
 }
 
 address JeandleCompiledCode::lookup_const_section(llvm::StringRef name, JeandleAssembler& assembler) {
@@ -562,14 +584,6 @@ JeandleStackMap* JeandleCompiledCode::parse_stackmap(StackMapParser& stackmaps, 
         num_deopts -= 3;
         break;
       }
-      case DeoptValueEncoding::OrigPcSlotType: {
-        assert(location != record->location_end(), "must be in range");
-        auto orig_pc_location = *(location++);
-        assert(StackMapUtil::is_stack(orig_pc_location), "orig pc slot must be stack allocated");
-        set_real_orig_pc_offset_in_bytes(StackMapUtil::stack_offset(orig_pc_location));
-        num_deopts -= 2;
-        break;
-      }
       default:
         Unimplemented();
     }
@@ -694,17 +708,26 @@ int JeandleCompiledCode::frame_size_in_slots() {
   return _frame_size * sizeof(intptr_t) / VMRegImpl::stack_slot_size;
 }
 
-void JeandleCompiledCode::set_real_orig_pc_offset_in_bytes(int offset) {
-  assert(offset >= 0, "sanity");
-  if (_orig_pc_offset_in_bytes == -1) {
-    _orig_pc_offset_in_bytes = offset;
-  } else {
-    assert(_orig_pc_offset_in_bytes == offset, "orig pc slot offset must be stable");
-  }
+void JeandleCompiledCode::adjust_orig_pc_offset_in_bytes() {
+  assert(_orig_pc_offset_in_bytes != max_jint, "orig pc slot anchor must be parsed before adjusting");
+
+  // LLVM reports the entry alloca as an FP-relative fixed slot. HotSpot
+  // installs orig_pc_offset relative to unextended_sp(), not the frame
+  // pointer. For compiled frames, sender_sp is reconstructed from
+  // unextended_sp() + frame_size(), while the saved frame pointer and return
+  // PC occupy the frame record immediately below sender_sp. Therefore fp sits
+  // frame::sender_sp_offset words below sender_sp, so the distance from
+  // unextended_sp() to fp is frame_size - frame_record_size rather than the
+  // whole frame size.
+  int fp_to_unextended_sp_in_bytes = _frame_size * BytesPerWord - frame::sender_sp_offset * BytesPerWord;
+  assert(fp_to_unextended_sp_in_bytes >= 0, "compiled frame must cover frame record");
+
+  _orig_pc_offset_in_bytes += fp_to_unextended_sp_in_bytes;
+  assert(_orig_pc_offset_in_bytes >= 0, "sanity");
 }
 
 int JeandleCompiledCode::orig_pc_offset_in_bytes() const {
-  if (_needs_orig_pc_offset < 0) {
+  if (_orig_pc_offset_in_bytes == max_jint) {
     return 0;
   }
   return _orig_pc_offset_in_bytes;
