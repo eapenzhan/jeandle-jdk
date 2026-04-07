@@ -43,7 +43,6 @@
 #include "ci/ciMethod.hpp"
 #include "code/exceptionHandlerTable.hpp"
 #include "runtime/sharedRuntime.hpp"
-#include "utilities/globalDefinitions.hpp"
 
 class JeandleReloc;
 
@@ -56,12 +55,13 @@ public:
     ArgumentType = 2,
     MonitorType = 3,
     ScalarValueType = 4,
-    LastType = ScalarValueType + 1
+    OrigPcSlotType = 5,
+    LastType = OrigPcSlotType + 1
   };
   DeoptValueEncoding(int index, DeoptValueType value_type, BasicType basic_type):
     _index(index), _value_type(value_type), _basic_type(basic_type) {
     assert(_value_type == LocalType || _value_type == StackType ||
-           _value_type == MonitorType,
+           _value_type == MonitorType || _value_type == OrigPcSlotType,
            "Unsupported value type");
   }
 
@@ -90,6 +90,7 @@ public:
       case ArgumentType: return "ArgumentType";
       case MonitorType: return "MonitorType";
       case ScalarValueType: return "ScalarValueType";
+      case OrigPcSlotType: return "OrigPcSlotType";
       default: return "Unknown";
     }
   }
@@ -189,7 +190,7 @@ class JeandleCompiledCode : public StackObj {
                       _routine_entry(nullptr),
                       _func_name(JeandleFuncSig::method_name_with_signature(_method)),
                       _orig_pc_slot(nullptr),
-                      _orig_pc_offset_in_bytes(max_jint),
+                      _orig_pc_offset_in_bytes(-1),
                       _interpreter_frame_size_in_bytes(0),
                       _has_method_handle_invoke(false) {}
 
@@ -205,7 +206,7 @@ class JeandleCompiledCode : public StackObj {
                       _routine_entry(nullptr),
                       _func_name(func_name),
                       _orig_pc_slot(nullptr),
-                      _orig_pc_offset_in_bytes(max_jint),
+                      _orig_pc_offset_in_bytes(-1),
                       _interpreter_frame_size_in_bytes(0),
                       _has_method_handle_invoke(false) {}
 
@@ -231,9 +232,8 @@ class JeandleCompiledCode : public StackObj {
   int orig_pc_offset_in_bytes() const;
   void set_orig_pc_slot(llvm::Value* slot) { _orig_pc_slot = slot; }
   llvm::Value* orig_pc_slot() const { return _orig_pc_slot; }
-  void adjust_orig_pc_offset_in_bytes();
+  void set_real_orig_pc_offset_in_bytes(int offset);
   void set_has_method_handle_invoke(bool z) { _has_method_handle_invoke = z; }
-  static uint64_t orig_pc_slot_anchor_id() { return static_cast<uint64_t>(-1); }
 
   address routine_entry() const { return _routine_entry; }
   void set_routine_entry(address entry) { _routine_entry = entry; }
@@ -281,7 +281,6 @@ class JeandleCompiledCode : public StackObj {
   void setup_frame_size();
 
   void resolve_reloc_info(JeandleAssembler& assembler);
-  void parse_orig_pc_slot_anchor(StackMapParser::record_iterator& record);
   bool pd_resolve_reloc(JeandleAssembler& assembler,
                         llvm::SmallVector<JeandleReloc*>& relocs,
                         llvm::jitlink::LinkGraph* link_graph);

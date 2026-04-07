@@ -21,7 +21,6 @@
 #include "jeandle/__llvmHeadersBegin__.hpp"
 #include "llvm/Analysis/ConstantFolding.h"
 #include "llvm/IR/Attributes.h"
-#include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/Jeandle/Attributes.h"
 #include "llvm/IR/Jeandle/GCStrategy.h"
 #include "llvm/IR/Jeandle/Metadata.h"
@@ -203,7 +202,7 @@ void JeandleVMState::store(BasicType type, int index, llvm::Value* value) {
 
 llvm::SmallVector<llvm::Value*> JeandleVMState::deopt_args(llvm::IRBuilder<>& builder, int bci) {
   llvm::SmallVector<llvm::Value*> args;
-  // |--- bci ---|--- locals ---|--- stack ---|--- monitor ---|
+  // |--- bci ---|--- locals ---|--- stack ---|--- monitor ---|--- orig_pc ---|
   /* TODO: scalar */
   args.push_back(builder.getInt32(bci));
   for (size_t i = 0; i < _locals.size(); i++) {
@@ -255,6 +254,11 @@ llvm::SmallVector<llvm::Value*> JeandleVMState::deopt_args(llvm::IRBuilder<>& bu
     args.push_back(builder.getInt64(encode));
     args.push_back(obj.value());
     args.push_back(lock);
+  }
+  if (llvm::Value* orig_pc_slot = JeandleCompilation::current()->compiled_code()->orig_pc_slot()) {
+    uint64_t encode = DeoptValueEncoding(0, DeoptValueEncoding::OrigPcSlotType, T_ADDRESS).encode();
+    args.push_back(builder.getInt64(encode));
+    args.push_back(orig_pc_slot);
   }
   // update interpreter frame size for deopt
   JeandleCompilation::current()->compiled_code()->update_interpreter_frame_size_in_bytes(interpreter_frame_size_in_bytes());
@@ -722,10 +726,6 @@ void JeandleAbstractInterpreter::interpret() {
 
   // Create branch from the entry block.
   _ir_builder.SetInsertPoint(_block_builder->entry_block()->tail_llvm_block());
-  if (_method != nullptr) {
-    ensure_orig_pc_slot();
-    emit_orig_pc_slot_anchor();
-  }
   _ir_builder.CreateBr(current->header_llvm_block());
 
   bool merged = current->merge_VM_state_from(_block_builder->entry_block()->VM_state(),
@@ -753,29 +753,13 @@ llvm::Value* JeandleAbstractInterpreter::ensure_orig_pc_slot() {
 
   llvm::BasicBlock* entry_header = _block_builder->entry_block()->header_llvm_block();
   llvm::Instruction* term = entry_header->getTerminator();
-  // Keep the slot in the entry block so LLVM can treat it as a static alloca and
-  // expose a fixed stack slot in the stackmap. Some methods reach here before the
-  // entry terminator is created, so fall back to appending to the block.
-  llvm::IRBuilder<> entry_block_ir_builder(*_context);
-  if (term != nullptr) {
-    entry_block_ir_builder.SetInsertPoint(term);
-  } else {
-    entry_block_ir_builder.SetInsertPoint(entry_header);
-  }
+  assert(term != nullptr, "OrigPcSlot should be allocated after the entry terminator exists");
+
+  llvm::IRBuilder<> entry_block_ir_builder(term);
   llvm::Value* slot = entry_block_ir_builder.CreateAlloca(_ir_builder.getIntPtrTy(_module.getDataLayout()),
                                                           llvm::jeandle::AddrSpace::CHeapAddrSpace, nullptr, "OrigPcSlot");
   _compiled_code.set_orig_pc_slot(slot);
   return slot;
-}
-
-void JeandleAbstractInterpreter::emit_orig_pc_slot_anchor() {
-  llvm::Value* orig_pc_slot = ensure_orig_pc_slot();
-  llvm::CallInst* anchor =
-    _ir_builder.CreateIntrinsic(llvm::Intrinsic::experimental_stackmap,
-                                {_ir_builder.getInt64(JeandleCompiledCode::orig_pc_slot_anchor_id()),
-                                 _ir_builder.getInt32(0),
-                                 orig_pc_slot});
-  anchor->setDoesNotThrow();
 }
 
 void JeandleAbstractInterpreter::interpret_block(JeandleBasicBlock* block) {
@@ -1969,6 +1953,11 @@ llvm::InvokeInst* JeandleAbstractInterpreter::call_java_op_ex(llvm::StringRef ja
   assert(java_op_func != nullptr, "invalid JavaOp");
   llvm::InvokeInst* invoke_inst = create_call_ex(java_op_func, args, llvm::CallingConv::Hotspot_JIT, deopt_bundle);
   return invoke_inst;
+}
+
+llvm::OperandBundleDef JeandleAbstractInterpreter::create_current_deopt_bundle() {
+  ensure_orig_pc_slot();
+  return llvm::OperandBundleDef("deopt", _jvm->deopt_args(_ir_builder, _bytecodes.cur_bci()));
 }
 
 llvm::Value* JeandleAbstractInterpreter::find_or_insert_oop(ciObject* oop) {

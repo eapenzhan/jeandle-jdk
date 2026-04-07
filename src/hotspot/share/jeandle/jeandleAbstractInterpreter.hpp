@@ -290,7 +290,6 @@ class JeandleAbstractInterpreter : public StackObj {
 
   void initialize_VM_state();
   llvm::Value* ensure_orig_pc_slot();
-  void emit_orig_pc_slot_anchor();
   void interpret();
   void interpret_block(JeandleBasicBlock* block);
 
@@ -330,9 +329,7 @@ class JeandleAbstractInterpreter : public StackObj {
                                    llvm::CallingConv::ID calling_conv,
                                    llvm::ArrayRef<llvm::OperandBundleDef> deopt_bundle = {});
 
-  llvm::OperandBundleDef create_current_deopt_bundle() {
-    return llvm::OperandBundleDef("deopt", _jvm->deopt_args(_ir_builder, _bytecodes.cur_bci()));
-  }
+  llvm::OperandBundleDef create_current_deopt_bundle();
 
   void add_safepoint_poll();
 

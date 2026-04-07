@@ -59,10 +59,9 @@ public class TestScopeValues {
         // check IR
         checker.checkNext("entry:");
         checker.checkNext("%OrigPcSlot = alloca i64, align 8"); // Add original pc slot for deopt
-        checker.checkNextPattern("call void \\(i64, i32, ...\\) @llvm.experimental.stackmap\\(i64 -1, i32 0, ptr %OrigPcSlot\\)");
         checker.checkNext("br label %bci_0");
         checker.checkNext("bci_0:");
-        checker.checkNextPattern("invoke hotspotcc .*compiler_jeandle_deoptimize_TestScopeValues\\$TestWrapper_empty.* \"deopt\"\\(i32 11, i64 12, ptr addrspace\\(1\\) %0, i64 4294967306, i32 10, i64 8589934603, i64 12, i64 17179869190, float 1.300000e\\+01\\)");
+        checker.checkNextPattern("invoke hotspotcc .*compiler_jeandle_deoptimize_TestScopeValues\\$TestWrapper_empty.* \"deopt\"\\(i32 11, i64 12, ptr addrspace\\(1\\) %0, i64 4294967306, i32 10, i64 8589934603, i64 12, i64 17179869190, float 1.300000e\\+01\\, i64 327695, ptr %OrigPcSlot\\)");
 
         // check DebugInfo in nmethods output
         /* example output of PcDesc

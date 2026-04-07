@@ -39,10 +39,6 @@ public:
     return reg == rsp;
   }
 
-  static const bool is_frame_pointer(Register reg) {
-    return reg == rbp;
-  }
-
   static const Register decode_dwarf_register(int dwarf_encoding) {
     assert(dwarf_encoding >=0 && dwarf_encoding < Register::number_of_registers, "invalid dwarf register number");
     return _dwarf_registers[dwarf_encoding];
