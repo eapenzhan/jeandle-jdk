@@ -190,7 +190,7 @@ class JeandleCompiledCode : public StackObj {
                       _routine_entry(nullptr),
                       _func_name(JeandleFuncSig::method_name_with_signature(_method)),
                       _orig_pc_slot(nullptr),
-                      _orig_pc_offset_in_bytes(0),
+                      _orig_pc_offset_in_bytes(-1),
                       _interpreter_frame_size_in_bytes(0),
                       _has_method_handle_invoke(false) {}
 
@@ -206,7 +206,7 @@ class JeandleCompiledCode : public StackObj {
                       _routine_entry(nullptr),
                       _func_name(func_name),
                       _orig_pc_slot(nullptr),
-                      _orig_pc_offset_in_bytes(0),
+                      _orig_pc_offset_in_bytes(-1),
                       _interpreter_frame_size_in_bytes(0),
                       _has_method_handle_invoke(false) {}
 

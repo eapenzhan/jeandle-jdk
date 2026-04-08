@@ -695,8 +695,8 @@ int JeandleCompiledCode::frame_size_in_slots() {
 }
 
 void JeandleCompiledCode::set_real_orig_pc_offset_in_bytes(int offset) {
-  assert(offset > 0, "sanity");
-  if (_orig_pc_offset_in_bytes == 0) {
+  assert(offset >= 0, "sanity");
+  if (_orig_pc_offset_in_bytes == -1) {
     _orig_pc_offset_in_bytes = offset;
   } else {
     assert(_orig_pc_offset_in_bytes == offset, "orig pc slot offset must be stable");
