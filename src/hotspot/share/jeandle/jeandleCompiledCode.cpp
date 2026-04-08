@@ -695,19 +695,12 @@ int JeandleCompiledCode::frame_size_in_slots() {
 }
 
 void JeandleCompiledCode::set_real_orig_pc_offset_in_bytes(int offset) {
-  assert(offset >= 0, "sanity");
-  if (_orig_pc_offset_in_bytes == -1) {
+  assert(offset > 0, "sanity");
+  if (_orig_pc_offset_in_bytes == 0) {
     _orig_pc_offset_in_bytes = offset;
   } else {
     assert(_orig_pc_offset_in_bytes == offset, "orig pc slot offset must be stable");
   }
-}
-
-int JeandleCompiledCode::orig_pc_offset_in_bytes() const {
-  if (_orig_pc_offset_in_bytes < 0) {
-    return 0;
-  }
-  return _orig_pc_offset_in_bytes;
 }
 
 uint32_t StackMapUtil::getConstantUint(const StackMapParser& parser, const StackMapParser::LocationAccessor& location) {

@@ -190,7 +190,7 @@ class JeandleCompiledCode : public StackObj {
                       _routine_entry(nullptr),
                       _func_name(JeandleFuncSig::method_name_with_signature(_method)),
                       _orig_pc_slot(nullptr),
-                      _orig_pc_offset_in_bytes(-1),
+                      _orig_pc_offset_in_bytes(0),
                       _interpreter_frame_size_in_bytes(0),
                       _has_method_handle_invoke(false) {}
 
@@ -206,7 +206,7 @@ class JeandleCompiledCode : public StackObj {
                       _routine_entry(nullptr),
                       _func_name(func_name),
                       _orig_pc_slot(nullptr),
-                      _orig_pc_offset_in_bytes(-1),
+                      _orig_pc_offset_in_bytes(0),
                       _interpreter_frame_size_in_bytes(0),
                       _has_method_handle_invoke(false) {}
 
@@ -229,7 +229,7 @@ class JeandleCompiledCode : public StackObj {
   ImplicitExceptionTable* implicit_exception_table() { return &_implicit_exception_table; }
 
   int frame_size() const { return _frame_size; }
-  int orig_pc_offset_in_bytes() const;
+  int orig_pc_offset_in_bytes() const { return _orig_pc_offset_in_bytes; }
   void set_orig_pc_slot(llvm::Value* slot) { _orig_pc_slot = slot; }
   llvm::Value* orig_pc_slot() const { return _orig_pc_slot; }
   void set_real_orig_pc_offset_in_bytes(int offset);
