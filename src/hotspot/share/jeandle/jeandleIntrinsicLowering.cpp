@@ -162,6 +162,19 @@ bool JeandleIntrinsicLowering::lower_pure_math(const JeandleIntrinsicDescriptor&
       annotate_generated_instruction(*call, desc, decision);
       _interp->_jvm->lpush(call);
       return true;
+    case vmIntrinsics::_bitCount_i:
+      call = builder.CreateIntrinsic(JeandleType::java2llvm(T_INT, ctx), llvm::Intrinsic::ctpop,
+                                     {_interp->_jvm->ipop()});
+      annotate_generated_instruction(*call, desc, decision);
+      _interp->_jvm->ipush(call);
+      return true;
+    case vmIntrinsics::_bitCount_l:
+      call = builder.CreateIntrinsic(JeandleType::java2llvm(T_LONG, ctx), llvm::Intrinsic::ctpop,
+                                     {_interp->_jvm->lpop()});
+      annotate_generated_instruction(*call, desc, decision);
+      // Long.bitCount(long) returns int — ctpop gives i64, trunc to i32 before pushing
+      _interp->_jvm->ipush(builder.CreateTrunc(call, JeandleType::java2llvm(T_INT, ctx)));
+      return true;
     case vmIntrinsics::_dsqrt:
     case vmIntrinsics::_dsqrt_strict:
       call = builder.CreateIntrinsic(JeandleType::java2llvm(T_DOUBLE, ctx), llvm::Intrinsic::sqrt,
