@@ -112,6 +112,8 @@ bool JeandleIntrinsicLowering::lower(const JeandleIntrinsicDescriptor& desc,
   switch (desc.semantics.category) {
     case JeandleIntrinsicCategory::PureMath:
       return lower_pure_math(desc, decision);
+    case JeandleIntrinsicCategory::TypeCoercion:
+      return lower_type_coercion(desc, decision);
     case JeandleIntrinsicCategory::LibmMath:
       if (desc.id == vmIntrinsics::_dpow) {
         return lower_pow_hybrid(desc, decision);
@@ -166,6 +168,45 @@ bool JeandleIntrinsicLowering::lower_pure_math(const JeandleIntrinsicDescriptor&
                                      {_interp->_jvm->dpop()});
       annotate_generated_instruction(*call, desc, decision);
       _interp->_jvm->dpush(call);
+      return true;
+    default:
+      return false;
+  }
+}
+
+bool JeandleIntrinsicLowering::lower_type_coercion(const JeandleIntrinsicDescriptor& desc,
+                                                   const JeandleIntrinsicDecision& decision) {
+  llvm::LLVMContext& ctx = *_interp->_context;
+  llvm::IRBuilder<>& builder = _interp->_ir_builder;
+  llvm::Value* cast = nullptr;
+  switch (desc.id) {
+    case vmIntrinsics::_floatToRawIntBits:
+      cast = builder.CreateBitCast(_interp->_jvm->fpop(), builder.getInt32Ty());
+      if (llvm::Instruction* inst = llvm::dyn_cast<llvm::Instruction>(cast)) {
+        annotate_generated_instruction(*inst, desc, decision);
+      }
+      _interp->_jvm->ipush(cast);
+      return true;
+    case vmIntrinsics::_intBitsToFloat:
+      cast = builder.CreateBitCast(_interp->_jvm->ipop(), llvm::Type::getFloatTy(ctx));
+      if (llvm::Instruction* inst = llvm::dyn_cast<llvm::Instruction>(cast)) {
+        annotate_generated_instruction(*inst, desc, decision);
+      }
+      _interp->_jvm->fpush(cast);
+      return true;
+    case vmIntrinsics::_doubleToRawLongBits:
+      cast = builder.CreateBitCast(_interp->_jvm->dpop(), builder.getInt64Ty());
+      if (llvm::Instruction* inst = llvm::dyn_cast<llvm::Instruction>(cast)) {
+        annotate_generated_instruction(*inst, desc, decision);
+      }
+      _interp->_jvm->lpush(cast);
+      return true;
+    case vmIntrinsics::_longBitsToDouble:
+      cast = builder.CreateBitCast(_interp->_jvm->lpop(), llvm::Type::getDoubleTy(ctx));
+      if (llvm::Instruction* inst = llvm::dyn_cast<llvm::Instruction>(cast)) {
+        annotate_generated_instruction(*inst, desc, decision);
+      }
+      _interp->_jvm->dpush(cast);
       return true;
     default:
       return false;
