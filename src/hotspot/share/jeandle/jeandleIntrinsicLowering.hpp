@@ -42,6 +42,8 @@ class JeandleIntrinsicLowering : public StackObj {
                         const JeandleIntrinsicDecision& decision);
   bool lower_reference_get(const JeandleIntrinsicDescriptor& desc,
                            const JeandleIntrinsicDecision& decision);
+  bool lower_reference_refers_to(const JeandleIntrinsicDescriptor& desc,
+                                  const JeandleIntrinsicDecision& decision);
   llvm::CallInst* emit_runtime_call(const JeandleIntrinsicDescriptor& desc,
                                     const JeandleIntrinsicDecision& decision,
                                     const JeandleRuntimeEntrypoint& entry,

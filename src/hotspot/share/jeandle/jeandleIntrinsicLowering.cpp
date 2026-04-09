@@ -121,6 +121,9 @@ bool JeandleIntrinsicLowering::lower(const JeandleIntrinsicDescriptor& desc,
       if (desc.id == vmIntrinsics::_Reference_get) {
         return lower_reference_get(desc, decision);
       }
+      if (desc.id == vmIntrinsics::_Reference_refersTo0) {
+        return lower_reference_refers_to(desc, decision);
+      }
       return false;
     default:
       return false;
@@ -269,5 +272,21 @@ bool JeandleIntrinsicLowering::lower_reference_get(const JeandleIntrinsicDescrip
     result = emit_java_op_call(desc, decision, {reference});
   }
   _interp->_jvm->apush(result);
+  return true;
+}
+
+bool JeandleIntrinsicLowering::lower_reference_refers_to(const JeandleIntrinsicDescriptor& desc,
+                                                          const JeandleIntrinsicDecision& decision) {
+  // Stack order: ..., reference (this), obj — pop in reverse
+  llvm::Value* obj = _interp->_jvm->apop();
+  llvm::Value* reference = _interp->_jvm->apop();
+  llvm::CallBase* result = nullptr;
+  if (decision.ir_plan.needs_exception_edge) {
+    result = emit_java_op_invoke(desc, decision, {reference, obj});
+  } else {
+    result = emit_java_op_call(desc, decision, {reference, obj});
+  }
+  // JavaOp returns i32 (JVM boolean convention); push as int
+  _interp->_jvm->ipush(result);
   return true;
 }

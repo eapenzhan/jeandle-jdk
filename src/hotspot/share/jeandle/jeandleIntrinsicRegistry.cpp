@@ -82,6 +82,11 @@ class JeandleIntrinsicRegistryTable : public AllStatic {
       {JeandleIntrinsicCategory::MemorySemantic, {false, false}, {true, true, JeandleMemoryBarrierKind::WeakReferentLoad}},
       JeandleLoweringKind::JavaOperation, JeandleFallbackPolicy::NormalInvoke, false, false, "jeandle.reference_get" },
 
+    // Reference.refersTo0(): raw referent pointer identity comparison (no GC barrier).
+    // may_deopt = false — no speculative guard.
+    { vmIntrinsics::_Reference_refersTo0,
+      {JeandleIntrinsicCategory::MemorySemantic, {false, false}, {true, true, JeandleMemoryBarrierKind::RawReferentRead}},
+      JeandleLoweringKind::JavaOperation, JeandleFallbackPolicy::NormalInvoke, false, false, "jeandle.reference_refers_to" },
   };
 };
 
