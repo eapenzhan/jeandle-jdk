@@ -36,6 +36,8 @@ class JeandleIntrinsicLowering : public StackObj {
 
   bool lower_pure_math(const JeandleIntrinsicDescriptor& desc,
                        const JeandleIntrinsicDecision& decision);
+  bool lower_type_coercion(const JeandleIntrinsicDescriptor& desc,
+                            const JeandleIntrinsicDecision& decision);
   bool lower_libm_math(const JeandleIntrinsicDescriptor& desc,
                        const JeandleIntrinsicDecision& decision);
   bool lower_pow_hybrid(const JeandleIntrinsicDescriptor& desc,
