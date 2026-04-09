@@ -218,6 +218,31 @@ DEF_JAVA_OP(new_instance, 1, llvm::PointerType::get(context, llvm::jeandle::Addr
   ir_builder.CreateRet(call_inst);
 JAVA_OP_END
 
+// Reference.refersTo0: raw load of the referent field, compare with obj, return boolean as i32.
+// This intentionally bypasses GC barriers (barrier_kind = RawReferentRead). The raw load is
+// correct here because refersTo0 compares pointer identity without triggering reference
+// processing. A GC-aware pass may insert additional fencing if required by the collector.
+DEF_JAVA_OP(reference_refers_to, 1, llvm::Type::getInt32Ty(context),
+            llvm::PointerType::get(context, llvm::jeandle::AddrSpace::JavaHeapAddrSpace),  // reference (this)
+            llvm::PointerType::get(context, llvm::jeandle::AddrSpace::JavaHeapAddrSpace))  // obj
+  llvm::Value* ref_obj    = func->getArg(0);
+  llvm::Value* compare_to = func->getArg(1);
+  llvm::GlobalVariable* offset_gv = template_module.getGlobalVariable("java_lang_ref_Reference.referent_offset", /*AllowInternal=*/true);
+  if (!offset_gv) {
+    RuntimeDefinedJavaOps::set_failed("java_lang_ref_Reference.referent_offset global not found in template module");
+    return;
+  }
+  llvm::Value* offset = ir_builder.CreateLoad(ir_builder.getInt32Ty(), offset_gv);
+  llvm::Value* referent_addr = ir_builder.CreateInBoundsGEP(ir_builder.getInt8Ty(), ref_obj, offset);
+  llvm::Type* ref_type = llvm::PointerType::get(context, llvm::jeandle::AddrSpace::JavaHeapAddrSpace);
+  // Raw load — no atomic ordering, no GC barrier (RawReferentRead semantics)
+  llvm::LoadInst* referent = ir_builder.CreateLoad(ref_type, referent_addr);
+  llvm::Value* is_equal = ir_builder.CreateICmpEQ(referent, compare_to);
+  // JVM boolean on the operand stack is i32
+  llvm::Value* result = ir_builder.CreateZExt(is_equal, ir_builder.getInt32Ty());
+  ir_builder.CreateRet(result);
+JAVA_OP_END
+
 // Reference.get: load the referent field with acquire semantics.
 // NOTE: This is a minimal implementation that handles the field load correctly
 // but does NOT include GC-specific barriers (G1 pre-load / ZGC / Shenandoah).
@@ -261,6 +286,7 @@ bool RuntimeDefinedJavaOps::define_all(llvm::Module& template_module) {
   define_pre_barrier(template_module);
   define_post_barrier(template_module);
   define_new_instance(template_module);
+  define_reference_refers_to(template_module);
   define_reference_get(template_module);
 
   return failed();
