@@ -31,7 +31,9 @@ class JeandleIntrinsicPolicyHelper : public AllStatic {
     const JeandleControlSemantics& control = desc.semantics.control;
     const JeandleMemorySemantics& memory = desc.semantics.memory;
 
-    if (impl_kind == JeandleIntrinsicImplKind::LLVMIntrinsic) {
+    if (impl_kind == JeandleIntrinsicImplKind::IRInstruction ||
+        impl_kind == JeandleIntrinsicImplKind::LLVMBuiltinCall ||
+        impl_kind == JeandleIntrinsicImplKind::PlatformHintAsm) {
       plan.mode = JeandleLoweringMode::PureLLVM;
     } else if (impl_kind == JeandleIntrinsicImplKind::HotSpotStub ||
                impl_kind == JeandleIntrinsicImplKind::SharedRuntime) {
