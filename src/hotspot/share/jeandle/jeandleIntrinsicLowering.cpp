@@ -174,7 +174,7 @@ bool JeandleIntrinsicLowering::lower_libm_math(const JeandleIntrinsicDescriptor&
   llvm::LLVMContext& ctx = *_interp->_context;
   llvm::IRBuilder<>& builder = _interp->_ir_builder;
 
-  if (decision.impl_kind == JeandleIntrinsicImplKind::LLVMIntrinsic) {
+  if (decision.impl_kind == JeandleIntrinsicImplKind::LLVMBuiltinCall) {
     llvm::Value* arg = _interp->_jvm->dpop();
     llvm::Intrinsic::ID llvm_id = llvm::Intrinsic::not_intrinsic;
     switch (desc.id) {

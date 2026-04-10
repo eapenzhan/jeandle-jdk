@@ -28,7 +28,11 @@ class ciMethod;
 
 enum class JeandleIntrinsicImplKind {
   Unsupported,
-  LLVMIntrinsic,
+  // PureIRNode sub-kinds: inline into the current function's IR, no call boundary
+  IRInstruction,    // bare LLVM IR instruction: bitcast, fmul, icmp, etc.
+  LLVMBuiltinCall,  // call to a named llvm.* builtin: fabs, abs, ctpop, sqrt, sin, ...
+  PlatformHintAsm,  // llvm::InlineAsm target hint: PAUSE (x86-64), YIELD (AArch64)
+  // Non-PureIRNode kinds: cross call boundaries or delegate to the runtime
   HotSpotStub,
   SharedRuntime,
   GuardedHybrid,
