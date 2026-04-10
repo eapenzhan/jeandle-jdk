@@ -94,6 +94,11 @@ class JeandleIntrinsicRegistryTable : public AllStatic {
       {JeandleIntrinsicCategory::LibmMath, {false, false}, {false, false}},
       JeandleLoweringKind::GuardedHybrid, JeandleFallbackPolicy::RuntimeCall, true, true, nullptr },
 
+    // System hints
+    { vmIntrinsics::_onSpinWait,
+      {JeandleIntrinsicCategory::MacroSemantic, {false, false}, {false, false}},
+      JeandleLoweringKind::PureIRNode, JeandleFallbackPolicy::None, false, false, nullptr },
+
     // Reference.get(): returns the referent, applying a GC load barrier (WeakReferentLoad).
     // may_deopt = false — no speculative guard; attach_deopt_bundle is plan-driven by
     // needs_gc_state, not by deoptimization semantics.

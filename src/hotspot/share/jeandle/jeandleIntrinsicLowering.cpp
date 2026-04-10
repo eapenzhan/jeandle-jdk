@@ -119,6 +119,8 @@ bool JeandleIntrinsicLowering::lower(const JeandleIntrinsicDescriptor& desc,
         return lower_pow_hybrid(desc, decision);
       }
       return lower_libm_math(desc, decision);
+    case JeandleIntrinsicCategory::MacroSemantic:
+      return lower_macro_semantic(desc, decision);
     case JeandleIntrinsicCategory::MemorySemantic:
       if (desc.id == vmIntrinsics::_Reference_get) {
         return lower_reference_get(desc, decision);
@@ -327,6 +329,18 @@ bool JeandleIntrinsicLowering::lower_reference_get(const JeandleIntrinsicDescrip
   }
   _interp->_jvm->apush(result);
   return true;
+}
+
+bool JeandleIntrinsicLowering::lower_macro_semantic(const JeandleIntrinsicDescriptor& desc,
+                                                    const JeandleIntrinsicDecision& decision) {
+  llvm::LLVMContext& ctx = *_interp->_context;
+  llvm::IRBuilder<>& builder = _interp->_ir_builder;
+  switch (desc.id) {
+    case vmIntrinsics::_onSpinWait:
+      return lower_spin_wait_hint(desc, decision);
+    default:
+      return false;
+  }
 }
 
 bool JeandleIntrinsicLowering::lower_reference_refers_to(const JeandleIntrinsicDescriptor& desc,
