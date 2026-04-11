@@ -119,13 +119,16 @@ bool JeandleIntrinsicLowering::lower(const JeandleIntrinsicDescriptor& desc,
         return lower_pow_hybrid(desc, decision);
       }
       return lower_libm_math(desc, decision);
+    case JeandleIntrinsicCategory::BarrierSemantic:
+      return lower_barrier_semantic(desc, decision);
     case JeandleIntrinsicCategory::MacroSemantic:
       return lower_macro_semantic(desc, decision);
     case JeandleIntrinsicCategory::MemorySemantic:
       if (desc.id == vmIntrinsics::_Reference_get) {
         return lower_reference_get(desc, decision);
       }
-      if (desc.id == vmIntrinsics::_Reference_refersTo0) {
+      if (desc.id == vmIntrinsics::_Reference_refersTo0 ||
+          desc.id == vmIntrinsics::_PhantomReference_refersTo0) {
         return lower_reference_refers_to(desc, decision);
       }
       return false;
@@ -328,6 +331,22 @@ bool JeandleIntrinsicLowering::lower_reference_get(const JeandleIntrinsicDescrip
     result = emit_java_op_call(desc, decision, {reference});
   }
   _interp->_jvm->apush(result);
+  return true;
+}
+
+bool JeandleIntrinsicLowering::lower_barrier_semantic(const JeandleIntrinsicDescriptor& desc,
+                                                      const JeandleIntrinsicDecision& decision) {
+  llvm::IRBuilder<>& builder = _interp->_ir_builder;
+  llvm::AtomicOrdering ordering;
+  switch (desc.id) {
+    case vmIntrinsics::_loadFence:  ordering = llvm::AtomicOrdering::Acquire;                break;
+    case vmIntrinsics::_storeFence: ordering = llvm::AtomicOrdering::Release;                break;
+    case vmIntrinsics::_fullFence:  ordering = llvm::AtomicOrdering::SequentiallyConsistent; break;
+    default: return false;
+  }
+  _interp->_jvm->apop(); // Unsafe receiver (invokevirtual, no other args)
+  llvm::FenceInst* fence = builder.CreateFence(ordering);
+  annotate_generated_instruction(*fence, desc, decision);
   return true;
 }
 
