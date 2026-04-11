@@ -25,12 +25,35 @@
 #include "classfile/vmIntrinsics.hpp"
 #include "runtime/sharedRuntime.hpp"
 #include "runtime/stubRoutines.hpp"
+#include "runtime/vm_version.hpp"
 
 JeandleIntrinsicCapabilities JeandleIntrinsicSupport::query(const JeandleIntrinsicDescriptor& desc) {
   JeandleIntrinsicCapabilities caps{};
 
   caps.has_llvm_builtin   = desc.supports_llvm_intrinsic;
   caps.hotspot_preferred  = JeandleUseHotspotIntrinsics;
+
+  // CPU-feature guards: some LLVM builtins require specific ISA extensions to
+  // produce a native instruction.  Override has_llvm_builtin to false when the
+  // required feature is absent so that policy falls back to NormalInvoke.
+  //
+  // _floor / _ceil / _rint:
+  //   x86-64  — needs SSE4.1 (ROUNDSD).  Without it LLVM would synthesise a
+  //             slow sequence; matching C2's Matcher::match_rule_supported()
+  //             guard we simply decline to intrinsify.
+  //   AArch64 — FRINTM/FRINTP/FRINTN are part of the ARMv8 base ISA; always ok.
+  //   Other   — conservatively allow; LLVM will pick the best lowering.
+  switch (desc.id) {
+    case vmIntrinsics::_floor:
+    case vmIntrinsics::_ceil:
+    case vmIntrinsics::_rint:
+#ifdef AMD64
+      caps.has_llvm_builtin = VM_Version::supports_sse4_1();
+#endif
+      break;
+    default:
+      break;
+  }
 
   if (!desc.supports_hotspot_stub) {
     return caps;

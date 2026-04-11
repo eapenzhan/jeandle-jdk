@@ -20,6 +20,7 @@
 #include "jeandle/jeandleIntrinsicLowering.hpp"
 
 #include "jeandle/__llvmHeadersBegin__.hpp"
+#include "llvm/Analysis/ConstantFolding.h"
 #include "llvm/IR/Constants.h"
 
 #include "jeandle/jeandleAbstractInterpreter.hpp"
@@ -36,13 +37,24 @@
 
 class JeandleIntrinsicLoweringHelper : public AllStatic {
  public:
-  static bool is_double_constant(llvm::Value* value, double expected) {
-    llvm::ConstantFP* constant = llvm::dyn_cast<llvm::ConstantFP>(value);
+  static bool is_double_constant(llvm::Value* value, double expected,
+                                 const llvm::DataLayout& data_layout) {
+    llvm::Constant* constant = llvm::dyn_cast<llvm::Constant>(value);
+    if (constant == nullptr) {
+      if (llvm::Instruction* inst = llvm::dyn_cast<llvm::Instruction>(value)) {
+        constant = llvm::ConstantFoldInstruction(inst, data_layout);
+      }
+    }
     if (constant == nullptr) {
       return false;
     }
+    constant = llvm::ConstantFoldConstant(constant, data_layout);
+    llvm::ConstantFP* fp_constant = llvm::dyn_cast<llvm::ConstantFP>(constant);
+    if (fp_constant == nullptr) {
+      return false;
+    }
     llvm::APFloat expected_value(expected);
-    return constant->getValueAPF().bitwiseIsEqual(expected_value);
+    return fp_constant->getValueAPF().bitwiseIsEqual(expected_value);
   }
 
   static void add_string_attr(llvm::CallBase& call, llvm::StringRef key, llvm::StringRef value) {
@@ -187,6 +199,26 @@ bool JeandleIntrinsicLowering::lower_pure_math(const JeandleIntrinsicDescriptor&
       annotate_generated_instruction(*call, desc, decision);
       _interp->_jvm->dpush(call);
       return true;
+    // Rounding intrinsics: GuardedHybrid, impl_kind resolved to LLVMBuiltinCall
+    // by policy after JeandleIntrinsicSupport confirmed CPU feature availability.
+    case vmIntrinsics::_floor:
+      call = builder.CreateIntrinsic(JeandleType::java2llvm(T_DOUBLE, ctx), llvm::Intrinsic::floor,
+                                     {_interp->_jvm->dpop()});
+      annotate_generated_instruction(*call, desc, decision);
+      _interp->_jvm->dpush(call);
+      return true;
+    case vmIntrinsics::_ceil:
+      call = builder.CreateIntrinsic(JeandleType::java2llvm(T_DOUBLE, ctx), llvm::Intrinsic::ceil,
+                                     {_interp->_jvm->dpop()});
+      annotate_generated_instruction(*call, desc, decision);
+      _interp->_jvm->dpush(call);
+      return true;
+    case vmIntrinsics::_rint:
+      call = builder.CreateIntrinsic(JeandleType::java2llvm(T_DOUBLE, ctx), llvm::Intrinsic::rint,
+                                     {_interp->_jvm->dpop()});
+      annotate_generated_instruction(*call, desc, decision);
+      _interp->_jvm->dpush(call);
+      return true;
     default:
       return false;
   }
@@ -278,7 +310,8 @@ bool JeandleIntrinsicLowering::lower_pow_hybrid(const JeandleIntrinsicDescriptor
   // Constant fast path: pow(x, 2.0) => x * x.
   // This overrides the policy decision (IRInstruction instead of LLVMBuiltinCall/HotSpotStub);
   // refine() produces accurate metadata for the emitted instruction.
-  if (JeandleIntrinsicLoweringHelper::is_double_constant(exp, 2.0)) {
+  if (JeandleIntrinsicLoweringHelper::is_double_constant(exp, 2.0,
+                                                         _interp->_module.getDataLayout())) {
     JeandleIntrinsicDecision refined = JeandleIntrinsicPolicy::refine(
       decision, desc, JeandleIntrinsicImplKind::IRInstruction, "pow(x,2) -> fmul");
     llvm::Value* fast = builder.CreateFMul(base, base);
@@ -289,21 +322,56 @@ bool JeandleIntrinsicLowering::lower_pow_hybrid(const JeandleIntrinsicDescriptor
     return true;
   }
 
-  // Constant fast path: pow(x, 0.5) => llvm.sqrt(x).
-  // This overrides the policy decision; refine() produces accurate metadata.
-  if (JeandleIntrinsicLoweringHelper::is_double_constant(exp, 0.5)) {
-    JeandleIntrinsicDecision refined = JeandleIntrinsicPolicy::refine(
+  // Constant fast path: pow(x, 0.5) => llvm.sqrt(x) only for x > 0.0.
+  if (JeandleIntrinsicLoweringHelper::is_double_constant(exp, 0.5,
+                                                         _interp->_module.getDataLayout())) {
+    JeandleIntrinsicDecision sqrt_decision = JeandleIntrinsicPolicy::refine(
       decision, desc, JeandleIntrinsicImplKind::LLVMBuiltinCall, "pow(x,0.5) -> llvm.sqrt");
-    llvm::CallInst* fast = builder.CreateIntrinsic(JeandleType::java2llvm(T_DOUBLE, ctx), llvm::Intrinsic::sqrt, {base});
-    annotate_generated_instruction(*fast, desc, refined);
-    _interp->_jvm->dpush(fast);
+    JeandleRuntimeEntrypoint runtime_entry;
+    if (!JeandleRuntimeEntrypoints::resolve_math(vmIntrinsics::_dpow, decision.impl_kind,
+                                                 _interp->_module, runtime_entry)) {
+      return false;
+    }
+
+    llvm::Type* ret_ty = JeandleType::java2llvm(T_DOUBLE, ctx);
+    llvm::Value* zero = llvm::ConstantFP::get(ret_ty, 0.0);
+    llvm::BasicBlock* fast_block = llvm::BasicBlock::Create(ctx,
+        "pow_0dot5_fast", _interp->_llvm_func);
+    llvm::BasicBlock* slow_block = llvm::BasicBlock::Create(ctx,
+        "pow_0dot5_slow", _interp->_llvm_func);
+    llvm::BasicBlock* merge_block = llvm::BasicBlock::Create(ctx,
+        "pow_0dot5_merge", _interp->_llvm_func);
+
+    llvm::Value* base_gt_zero = builder.CreateFCmpOGT(base, zero, "pow.base_gt_zero");
+    builder.CreateCondBr(base_gt_zero, fast_block, slow_block);
+
+    builder.SetInsertPoint(fast_block);
+    llvm::CallInst* fast = builder.CreateIntrinsic(ret_ty, llvm::Intrinsic::sqrt, {base});
+    annotate_generated_instruction(*fast, desc, sqrt_decision);
+    builder.CreateBr(merge_block);
+
+    builder.SetInsertPoint(slow_block);
+    JeandleIntrinsicDecision runtime_decision = JeandleIntrinsicPolicy::refine(
+        decision, desc, JeandleIntrinsicImplKind::HotSpotStub, "pow(x,0.5) slow -> runtime");
+    llvm::Value* slow = emit_runtime_call(desc, runtime_decision, runtime_entry, {base, exp});
+    builder.CreateBr(merge_block);
+
+    builder.SetInsertPoint(merge_block);
+    _interp->_block->set_tail_llvm_block(merge_block);
+    llvm::PHINode* result = builder.CreatePHI(ret_ty, 2, "pow_0dot5.result");
+    result->addIncoming(fast, fast_block);
+    result->addIncoming(slow, slow_block);
+    _interp->_jvm->dpush(result);
     return true;
   }
 
   // General path: use the impl_kind that policy already resolved.
   // For LLVMBuiltinCall policy chose llvm.pow; for HotSpotStub/SharedRuntime delegate to runtime.
   if (decision.impl_kind == JeandleIntrinsicImplKind::LLVMBuiltinCall) {
-    llvm::CallInst* call = builder.CreateIntrinsic(JeandleType::java2llvm(T_DOUBLE, ctx), llvm::Intrinsic::pow, {base, exp});
+    llvm::Function* pow_fn =
+      llvm::Intrinsic::getOrInsertDeclaration(&_interp->_module, llvm::Intrinsic::pow,
+                                              {JeandleType::java2llvm(T_DOUBLE, ctx)});
+    llvm::CallInst* call = builder.CreateCall(pow_fn, {base, exp});
     annotate_generated_instruction(*call, desc, decision);
     _interp->_jvm->dpush(call);
     return true;
