@@ -146,7 +146,8 @@ JeandleIntrinsicDecision JeandleIntrinsicPolicy::decide(const JeandleIntrinsicDe
       // determined by category alone (no capability query needed).
       JeandleIntrinsicImplKind k;
       const char* reason;
-      if (desc.semantics.category == JeandleIntrinsicCategory::TypeCoercion) {
+      if (desc.semantics.category == JeandleIntrinsicCategory::TypeCoercion ||
+          desc.semantics.category == JeandleIntrinsicCategory::BarrierSemantic) {
         k = JeandleIntrinsicImplKind::IRInstruction;
         reason = "lower to IR instruction";
       } else {

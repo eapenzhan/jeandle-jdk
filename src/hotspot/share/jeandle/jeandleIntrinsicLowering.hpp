@@ -46,6 +46,8 @@ class JeandleIntrinsicLowering : public StackObj {
                            const JeandleIntrinsicDecision& decision);
   bool lower_reference_refers_to(const JeandleIntrinsicDescriptor& desc,
                                   const JeandleIntrinsicDecision& decision);
+  bool lower_barrier_semantic(const JeandleIntrinsicDescriptor& desc,
+                              const JeandleIntrinsicDecision& decision);
   bool lower_macro_semantic(const JeandleIntrinsicDescriptor& desc,
                             const JeandleIntrinsicDecision& decision);
   // Platform-specific spin-wait hint emission.

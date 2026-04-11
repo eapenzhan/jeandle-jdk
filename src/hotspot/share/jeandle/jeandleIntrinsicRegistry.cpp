@@ -111,6 +111,26 @@ class JeandleIntrinsicRegistryTable : public AllStatic {
     { vmIntrinsics::_Reference_refersTo0,
       {JeandleIntrinsicCategory::MemorySemantic, {false, false}, {true, true, JeandleMemoryBarrierKind::RawReferentRead}},
       JeandleLoweringKind::JavaOperation, JeandleFallbackPolicy::NormalInvoke, false, false, "jeandle.reference_refers_to" },
+
+    // Memory fences: lower to LLVM fence instructions (acquire / release / seq_cst).
+    // These have memory effects but no GC interaction; barrier_kind is None because
+    // the fence IR instruction is the complete implementation — no GC pass augmentation needed.
+    { vmIntrinsics::_loadFence,
+      {JeandleIntrinsicCategory::BarrierSemantic, {false, false}, {true, false}},
+      JeandleLoweringKind::PureIRNode, JeandleFallbackPolicy::None, false, false, nullptr },
+    { vmIntrinsics::_storeFence,
+      {JeandleIntrinsicCategory::BarrierSemantic, {false, false}, {true, false}},
+      JeandleLoweringKind::PureIRNode, JeandleFallbackPolicy::None, false, false, nullptr },
+    { vmIntrinsics::_fullFence,
+      {JeandleIntrinsicCategory::BarrierSemantic, {false, false}, {true, false}},
+      JeandleLoweringKind::PureIRNode, JeandleFallbackPolicy::None, false, false, nullptr },
+
+    // PhantomReference.refersTo0 shares identical semantics with Reference.refersTo0:
+    // raw referent read (no GC barrier), pointer identity comparison, boolean result.
+    // may_deopt = false — no speculative guard.
+    { vmIntrinsics::_PhantomReference_refersTo0,
+      {JeandleIntrinsicCategory::MemorySemantic, {false, false}, {true, true, JeandleMemoryBarrierKind::RawReferentRead}},
+      JeandleLoweringKind::JavaOperation, JeandleFallbackPolicy::NormalInvoke, false, false, "jeandle.reference_refers_to" },
   };
 };
 
