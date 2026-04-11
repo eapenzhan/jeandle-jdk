@@ -59,6 +59,21 @@ class JeandleIntrinsicRegistryTable : public AllStatic {
       {JeandleIntrinsicCategory::PureMath, {false, false}, {false, false}},
       JeandleLoweringKind::PureIRNode, JeandleFallbackPolicy::None, false, true, nullptr },
 
+    // Rounding: GuardedHybrid because a native instruction is required for
+    // correctness/performance (SSE4.1 ROUNDSD on x86, FRINT* on AArch64).
+    // JeandleIntrinsicSupport::query() checks the CPU feature at decision time;
+    // if absent, any_path() returns false and the call is not intrinsified
+    // (NormalInvoke fallback).  This mirrors C2's match_rule_supported() guard.
+    { vmIntrinsics::_floor,
+      {JeandleIntrinsicCategory::PureMath, {false, false}, {false, false}},
+      JeandleLoweringKind::GuardedHybrid, JeandleFallbackPolicy::NormalInvoke, false, true, nullptr },
+    { vmIntrinsics::_ceil,
+      {JeandleIntrinsicCategory::PureMath, {false, false}, {false, false}},
+      JeandleLoweringKind::GuardedHybrid, JeandleFallbackPolicy::NormalInvoke, false, true, nullptr },
+    { vmIntrinsics::_rint,
+      {JeandleIntrinsicCategory::PureMath, {false, false}, {false, false}},
+      JeandleLoweringKind::GuardedHybrid, JeandleFallbackPolicy::NormalInvoke, false, true, nullptr },
+
     { vmIntrinsics::_floatToRawIntBits,
       {JeandleIntrinsicCategory::TypeCoercion, {false, false}, {false, false}},
       JeandleLoweringKind::PureIRNode, JeandleFallbackPolicy::None, false, true, nullptr },
