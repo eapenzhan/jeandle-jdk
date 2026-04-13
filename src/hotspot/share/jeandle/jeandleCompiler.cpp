@@ -53,6 +53,62 @@ void install_jeandle_llvm_fatal_error_handler() {
   }
 }
 
+void apply_vm_flag_feature_overrides(llvm::SubtargetFeatures& features) {
+#ifdef AMD64
+  // Keep LLVM codegen aligned with HotSpot's VM-flag-controlled effective ISA
+  // rather than the raw host feature set. This mirrors how C1/C2 use UseSSE
+  // and UseAVX to gate instruction selection even when the hardware supports
+  // more.
+  if (UseSSE < 1) {
+    features.AddFeature("sse", false);
+  }
+  if (UseSSE < 2) {
+    features.AddFeature("sse2", false);
+  }
+  if (UseSSE < 3) {
+    features.AddFeature("sse3", false);
+    features.AddFeature("ssse3", false);
+    features.AddFeature("sse4a", false);
+  }
+  if (UseSSE < 4) {
+    features.AddFeature("sse4.1", false);
+    features.AddFeature("sse4.2", false);
+  }
+
+  if (UseAVX < 1) {
+    features.AddFeature("avx", false);
+  }
+  if (UseAVX < 2) {
+    features.AddFeature("avx2", false);
+  }
+  if (UseAVX < 3) {
+    features.AddFeature("avx512f", false);
+    features.AddFeature("avx512dq", false);
+    features.AddFeature("avx512cd", false);
+    features.AddFeature("avx512bw", false);
+    features.AddFeature("avx512vl", false);
+    features.AddFeature("avx512vpopcntdq", false);
+    features.AddFeature("avx512vbmi", false);
+    features.AddFeature("avx512vbmi2", false);
+    features.AddFeature("avx512vnni", false);
+    features.AddFeature("avx512bitalg", false);
+    features.AddFeature("avx512ifma", false);
+  }
+#endif
+
+#ifdef AARCH64
+  if (!UseLSE) {
+    features.AddFeature("lse", false);
+  }
+  if (UseSVE < 2) {
+    features.AddFeature("sve2", false);
+  }
+  if (UseSVE < 1) {
+    features.AddFeature("sve", false);
+  }
+#endif
+}
+
 } // anonymous namespace
 
 THREAD_LOCAL llvm::TargetMachine* JeandleCompiler::_target_machine = nullptr;
@@ -73,7 +129,21 @@ bool JeandleCompiler::initialize_target_machine() {
   llvm::SubtargetFeatures features;
   options.EmitStackSizeSection = true;
 
-  _target_machine = target->createTargetMachine(target_triple, ""/* CPU */, features.getString(), options,
+  std::string cpu = llvm::sys::getHostCPUName().str();
+  if (cpu.empty()) {
+    cpu = "generic";
+  }
+
+  llvm::StringMap<bool> host_features = llvm::sys::getHostCPUFeatures();
+  for (const auto& feature : host_features) {
+    if (feature.second) {
+      features.AddFeature(feature.first());
+    }
+  }
+
+  apply_vm_flag_feature_overrides(features);
+
+  _target_machine = target->createTargetMachine(target_triple, cpu, features.getString(), options,
                                                 llvm::Reloc::Model::PIC_, llvm::CodeModel::Model::Small,
                                                 llvm::CodeGenOptLevel::Aggressive, true/* JIT */);
   return _target_machine != nullptr;
