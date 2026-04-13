@@ -42,6 +42,8 @@ class JeandleIntrinsicLowering : public StackObj {
                        const JeandleIntrinsicDecision& decision);
   bool lower_pow_hybrid(const JeandleIntrinsicDescriptor& desc,
                         const JeandleIntrinsicDecision& decision);
+  bool lower_get_class(const JeandleIntrinsicDescriptor& desc,
+                       const JeandleIntrinsicDecision& decision);
   bool lower_reference_get(const JeandleIntrinsicDescriptor& desc,
                            const JeandleIntrinsicDecision& decision);
   bool lower_reference_refers_to(const JeandleIntrinsicDescriptor& desc,

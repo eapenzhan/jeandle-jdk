@@ -45,6 +45,7 @@
 
 ; Byte offsets for Klass structure fields.
 @Klass.access_flags_offset = external global i32
+@Klass.java_mirror_offset = external global i32
 @Klass.secondary_super_cache_offset = external global i32
 @Klass.secondary_supers_offset = external global i32
 @Klass.super_check_offset_offset = external global i32

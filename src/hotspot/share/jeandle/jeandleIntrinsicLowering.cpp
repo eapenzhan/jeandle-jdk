@@ -135,6 +135,11 @@ bool JeandleIntrinsicLowering::lower(const JeandleIntrinsicDescriptor& desc,
       return lower_barrier_semantic(desc, decision);
     case JeandleIntrinsicCategory::MacroSemantic:
       return lower_macro_semantic(desc, decision);
+    case JeandleIntrinsicCategory::TypeSemantic:
+      if (desc.id == vmIntrinsics::_getClass) {
+        return lower_get_class(desc, decision);
+      }
+      return false;
     case JeandleIntrinsicCategory::MemorySemantic:
       if (desc.id == vmIntrinsics::_Reference_get) {
         return lower_reference_get(desc, decision);
@@ -386,6 +391,19 @@ bool JeandleIntrinsicLowering::lower_pow_hybrid(const JeandleIntrinsicDescriptor
   } else {
     _interp->_jvm->dpush(emit_runtime_call(desc, decision, entry, {base, exp}));
   }
+  return true;
+}
+
+bool JeandleIntrinsicLowering::lower_get_class(const JeandleIntrinsicDescriptor& desc,
+                                               const JeandleIntrinsicDecision& decision) {
+  llvm::Value* obj = _interp->_jvm->apop();
+  llvm::CallBase* result = nullptr;
+  if (decision.ir_plan.needs_exception_edge) {
+    result = emit_java_op_invoke(desc, decision, {obj});
+  } else {
+    result = emit_java_op_call(desc, decision, {obj});
+  }
+  _interp->_jvm->apush(result);
   return true;
 }
 

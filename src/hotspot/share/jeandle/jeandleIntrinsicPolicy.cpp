@@ -56,6 +56,14 @@ class JeandleIntrinsicPolicyHelper : public AllStatic {
       plan.mode = JeandleLoweringMode::ManagedRuntimeInvoke;
     }
 
+    // attach_deopt_bundle is a plan-level combined decision driven by multiple independent
+    // factors.  It does NOT mean the intrinsic itself will deopt — may_deopt is the correct
+    // field for that.  The bundle is also required when:
+    //   - needs_gc_state: the call site is GC-sensitive and RewriteStatepointsForGC needs
+    //     interpreter state for stack-map reconstruction.
+    //   - ManagedRuntimeCall / ManagedRuntimeInvoke: the call crosses a safepoint boundary.
+    //   - JavaOpCall: conservative; JavaOp calls are always treated as non-leaf until the
+    //     JavaOp lowering infrastructure can derive precise bundle requirements.
     plan.attach_deopt_bundle = control.may_deopt || memory.needs_gc_state ||
                                plan.mode == JeandleLoweringMode::ManagedRuntimeCall ||
                                plan.mode == JeandleLoweringMode::ManagedRuntimeInvoke ||
