@@ -180,6 +180,39 @@ DEF_JAVA_OP(new_instance, 1, llvm::PointerType::get(context, llvm::jeandle::Addr
   ir_builder.CreateRet(call_inst);
 JAVA_OP_END
 
+// Object.getClass(): load the java.lang.Class mirror for an object.
+// Two-level load via the OopHandle stored in Klass::_java_mirror:
+//   1. Load klass from object header (jeandle.load_klass).
+//   2. Load the OopHandle pointer from klass + java_mirror_offset  -> oop* in C heap.
+//   3. Dereference the OopHandle to get the actual mirror oop in the Java heap.
+// The mirror is always reachable (a GC root inside the Klass), so no null check is needed.
+DEF_JAVA_OP(get_class, 1, llvm::PointerType::get(context, llvm::jeandle::AddrSpace::JavaHeapAddrSpace),
+            llvm::PointerType::get(context, llvm::jeandle::AddrSpace::JavaHeapAddrSpace))  // obj (receiver)
+  llvm::Value* obj = func->getArg(0);
+  // Step 1: load klass pointer from object header
+  llvm::Function* load_klass_func = template_module.getFunction("jeandle.load_klass");
+  if (!load_klass_func) {
+    RuntimeDefinedJavaOps::set_failed("jeandle.load_klass is not found in template module");
+    return;
+  }
+  llvm::CallInst* klass = ir_builder.CreateCall(load_klass_func, {obj});
+  klass->setCallingConv(llvm::CallingConv::Hotspot_JIT);
+  // Step 2: load OopHandle (oop*) stored at klass + java_mirror_offset
+  llvm::GlobalVariable* mirror_offset_gv = template_module.getGlobalVariable("Klass.java_mirror_offset", /*AllowInternal=*/true);
+  if (!mirror_offset_gv) {
+    RuntimeDefinedJavaOps::set_failed("Klass.java_mirror_offset global not found in template module");
+    return;
+  }
+  llvm::Value* mirror_offset = ir_builder.CreateLoad(ir_builder.getInt32Ty(), mirror_offset_gv);
+  llvm::Value* oop_handle_addr = ir_builder.CreateInBoundsGEP(ir_builder.getInt8Ty(), klass, mirror_offset);
+  llvm::Type* c_heap_ptr_ty = llvm::PointerType::get(context, llvm::jeandle::AddrSpace::CHeapAddrSpace);
+  llvm::Value* oop_handle = ir_builder.CreateLoad(c_heap_ptr_ty, oop_handle_addr);
+  // Step 3: dereference OopHandle to get the actual mirror oop in the Java heap
+  llvm::Type* mirror_ty = llvm::PointerType::get(context, llvm::jeandle::AddrSpace::JavaHeapAddrSpace);
+  llvm::Value* mirror = ir_builder.CreateLoad(mirror_ty, oop_handle);
+  ir_builder.CreateRet(mirror);
+JAVA_OP_END
+
 // Reference.refersTo0: raw load of the referent field, compare with obj, return boolean as i32.
 // This intentionally bypasses GC barriers (barrier_kind = RawReferentRead). The raw load is
 // correct here because refersTo0 compares pointer identity without triggering reference
@@ -246,6 +279,7 @@ bool RuntimeDefinedJavaOps::define_all(llvm::Module& template_module) {
   define_safepoint_poll(template_module);
   define_card_table_barrier(template_module);
   define_new_instance(template_module);
+  define_get_class(template_module);
   define_reference_refers_to(template_module);
   define_reference_get(template_module);
 
@@ -299,6 +333,7 @@ void RuntimeDefinedJavaOps::define_global_variables(llvm::Module& template_modul
   define_global("arrayOopDesc.length_offset_in_bytes",              int32_type, static_cast<uint64_t>(arrayOopDesc::length_offset_in_bytes()));
   define_global("arrayOopDesc.base_offset_in_bytes.int",            int32_type, static_cast<uint64_t>(arrayOopDesc::base_offset_in_bytes(T_INT)));
   define_global("Klass.access_flags_offset",                        int32_type, static_cast<uint64_t>(Klass::access_flags_offset()));
+  define_global("Klass.java_mirror_offset",                         int32_type, static_cast<uint64_t>(in_bytes(Klass::java_mirror_offset())));
   define_global("Klass.secondary_super_cache_offset",               int32_type, static_cast<uint64_t>(Klass::secondary_super_cache_offset()));
   define_global("Klass.secondary_supers_offset",                    int32_type, static_cast<uint64_t>(Klass::secondary_supers_offset()));
   define_global("Klass.super_check_offset_offset",                  int32_type, static_cast<uint64_t>(Klass::super_check_offset_offset()));

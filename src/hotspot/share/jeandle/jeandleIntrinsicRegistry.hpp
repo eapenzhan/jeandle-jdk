@@ -37,6 +37,11 @@ enum class JeandleIntrinsicCategory {
 struct JeandleControlSemantics {
   bool may_deopt;
   bool needs_exception_edge;
+  // Set true when the intrinsic lowering assumes the receiver is already non-null
+  // (i.e., the null check is the caller's responsibility, not this intrinsic's).
+  // This is true for all invokevirtual/invokeinterface JavaOps where the abstract
+  // interpreter has already performed the null check before dispatch.
+  bool requires_nonnull_receiver = false;
 };
 
 enum class JeandleMemoryBarrierKind {

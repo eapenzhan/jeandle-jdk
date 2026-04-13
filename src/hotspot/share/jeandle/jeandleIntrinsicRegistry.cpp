@@ -114,17 +114,40 @@ class JeandleIntrinsicRegistryTable : public AllStatic {
       {JeandleIntrinsicCategory::MacroSemantic, {false, false}, {false, false}},
       JeandleLoweringKind::PureIRNode, JeandleFallbackPolicy::None, false, false, nullptr },
 
+    // Object.getClass(): loads the java.lang.Class mirror via the klass's OopHandle.
+    // TypeSemantic + JavaOperation: the two-level load (klass → OopHandle → mirror)
+    // is implemented as jeandle.get_class.
+    //
+    // Memory semantics:
+    //   has_memory_effect = true  — three memory loads (object header, OopHandle ptr, mirror oop)
+    //   needs_gc_state    = true  — the final load resolves a heap oop from OopStorage; a future
+    //                               GC-aware pass must see this site for barrier insertion
+    //
+    // Control semantics:
+    //   may_deopt              = false — NPE is an exception, not a deopt
+    //   requires_nonnull_receiver = true — the null check is the caller's responsibility;
+    //                               invokevirtual/invokeinterface bytecodes null-check the receiver
+    //                               before dispatch.  If getClass is ever lowered via a non-invoke
+    //                               path (e.g., inlined JavaOp, direct IR construction), a null
+    //                               check must be added at that callsite or inside the JavaOp itself.
+    //
+    // Note: attach_deopt_bundle is still set to true unconditionally for JavaOpCall mode
+    // (see make_plan); this is a conservative plan-level decision independent of may_deopt.
+    { vmIntrinsics::_getClass,
+      {JeandleIntrinsicCategory::TypeSemantic, {false, false, true}, {true, true}},
+      JeandleLoweringKind::JavaOperation, JeandleFallbackPolicy::NormalInvoke, false, false, "jeandle.get_class" },
+
     // Reference.get(): returns the referent, applying a GC load barrier (WeakReferentLoad).
     // may_deopt = false — no speculative guard; attach_deopt_bundle is plan-driven by
     // needs_gc_state, not by deoptimization semantics.
     { vmIntrinsics::_Reference_get,
-      {JeandleIntrinsicCategory::MemorySemantic, {false, false}, {true, true, JeandleMemoryBarrierKind::WeakReferentLoad}},
+      {JeandleIntrinsicCategory::MemorySemantic, {false, false, true}, {true, true, JeandleMemoryBarrierKind::WeakReferentLoad}},
       JeandleLoweringKind::JavaOperation, JeandleFallbackPolicy::NormalInvoke, false, false, "jeandle.reference_get" },
 
     // Reference.refersTo0(): raw referent pointer identity comparison (no GC barrier).
     // may_deopt = false — no speculative guard.
     { vmIntrinsics::_Reference_refersTo0,
-      {JeandleIntrinsicCategory::MemorySemantic, {false, false}, {true, true, JeandleMemoryBarrierKind::RawReferentRead}},
+      {JeandleIntrinsicCategory::MemorySemantic, {false, false, true}, {true, true, JeandleMemoryBarrierKind::RawReferentRead}},
       JeandleLoweringKind::JavaOperation, JeandleFallbackPolicy::NormalInvoke, false, false, "jeandle.reference_refers_to" },
 
     // Memory fences: lower to LLVM fence instructions (acquire / release / seq_cst).
@@ -144,7 +167,7 @@ class JeandleIntrinsicRegistryTable : public AllStatic {
     // raw referent read (no GC barrier), pointer identity comparison, boolean result.
     // may_deopt = false — no speculative guard.
     { vmIntrinsics::_PhantomReference_refersTo0,
-      {JeandleIntrinsicCategory::MemorySemantic, {false, false}, {true, true, JeandleMemoryBarrierKind::RawReferentRead}},
+      {JeandleIntrinsicCategory::MemorySemantic, {false, false, true}, {true, true, JeandleMemoryBarrierKind::RawReferentRead}},
       JeandleLoweringKind::JavaOperation, JeandleFallbackPolicy::NormalInvoke, false, false, "jeandle.reference_refers_to" },
   };
 };
