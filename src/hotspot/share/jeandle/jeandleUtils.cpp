@@ -21,6 +21,7 @@
 #include "jeandle/__llvmHeadersBegin__.hpp"
 #include "llvm/IR/Jeandle/Attributes.h"
 #include "llvm/IR/Jeandle/GCStrategy.h"
+#include "llvm/TargetParser/SubtargetFeature.h"
 
 #include "jeandle/jeandleType.hpp"
 #include "jeandle/jeandleUtils.hpp"
@@ -72,6 +73,12 @@ std::string JeandleFuncSig::method_name_with_signature(ciMethod* method) {
   std::string signature = std::string(method->signature()->as_symbol()->as_utf8());
   return method_name(method) + signature;
 }
+
+#if !defined(AMD64) && !defined(AARCH64)
+void apply_vm_flag_feature_overrides(llvm::SubtargetFeatures& features) {
+  (void)features;
+}
+#endif
 
 bool is_jeandle_compiler_thread(Thread* t) {
   if (t == nullptr || !t->is_Compiler_thread()) {

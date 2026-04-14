@@ -21,8 +21,24 @@
 #include "jeandle/__llvmHeadersBegin__.hpp"
 #include "llvm/IR/Jeandle/Attributes.h"
 #include "llvm/IR/Jeandle/GCStrategy.h"
+#include "llvm/TargetParser/SubtargetFeature.h"
 
 #include "jeandle/jeandleUtils.hpp"
+
+#include "jeandle/__hotspotHeadersBegin__.hpp"
+#include "runtime/arguments.hpp"
+
+void apply_vm_flag_feature_overrides(llvm::SubtargetFeatures& features) {
+  if (!UseLSE) {
+    features.AddFeature("lse", false);
+  }
+  if (UseSVE < 2) {
+    features.AddFeature("sve2", false);
+  }
+  if (UseSVE < 1) {
+    features.AddFeature("sve", false);
+  }
+}
 
 void JeandleFuncSig::setup_description(llvm::Function* func, bool is_stub) {
   func->setCallingConv(llvm::CallingConv::Hotspot_JIT);
