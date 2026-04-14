@@ -209,3 +209,37 @@ void JeandleRuntimeRoutine::generate_exception_handler() {
 
   _routine_entry[_exception_handler] = rs->entry_point();
 }
+
+void JeandleRuntimeRoutine::generate_deopt_blob() {
+  _routine_entry[_deopt_blob] = SharedRuntime::deopt_blob()->unpack();
+}
+
+int JeandleAssembler::deopt_handler_size() {
+  // count auipc + far branch
+  return NativeInstruction::instruction_size + MacroAssembler::far_branch_size();
+}
+
+// Emit deopt handler code.
+int HandlerImpl::emit_deopt_handler() {
+  // Allocate space for the code
+  ResourceMark rm;
+  // Setup code generation tools
+  CodeBuffer buffer(_exception_handler, 1024, 512);
+  MacroAssembler* masm = new MacroAssembler(&buffer);
+
+  // Note that the code buffer's insts_mark is always relative to insts.
+  // That's why we must use the macroassembler to generate a handler.
+  C2_MacroAssembler _masm(&cbuf);
+  address base = __ start_a_stub(deopt_handler_size());
+  if (base == NULL) {
+    JEANDLE_REPORT_ERROR_AND_RET("deopt handler stub overflow", 0);
+  }
+  int offset = __ offset();
+
+  __ auipc(ra, 0);
+  __ far_jump(RuntimeAddress(JeandleRuntimeRoutine::get_routine_entry(JeandleRuntimeRoutine::_deopt_blob)));
+
+  assert(__ offset() - offset <= (int) deopt_handler_size(), "deopt handler stub overflow");
+  __ end_a_stub();
+  return offset;
+}
