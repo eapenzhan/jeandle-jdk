@@ -225,7 +225,7 @@ int JeandleAssembler::deopt_handler_size() {
 }
 
 // Emit deopt handler code.
-int HandlerImpl::emit_deopt_handler() {
+int JeandleAssembler::emit_deopt_handler() {
   address base = __ start_a_stub(deopt_handler_size());
   if (base == NULL) {
     JEANDLE_REPORT_ERROR_AND_RET("deopt handler stub overflow", 0);
