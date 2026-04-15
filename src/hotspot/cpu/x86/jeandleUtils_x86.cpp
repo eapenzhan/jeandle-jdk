@@ -68,6 +68,31 @@ void apply_vm_flag_feature_overrides(llvm::SubtargetFeatures& features) {
     features.AddFeature("avx512bitalg", false);
     features.AddFeature("avx512ifma", false);
   }
+
+  if (!UseAES) {
+    features.AddFeature("aes", false);
+  }
+  if (!UseCLMUL) {
+    features.AddFeature("pclmul", false);
+  }
+  if (!UseFMA) {
+    features.AddFeature("fma", false);
+  }
+  if (!UseBMI1Instructions) {
+    features.AddFeature("bmi", false);
+  }
+  if (!UseBMI2Instructions) {
+    features.AddFeature("bmi2", false);
+  }
+  if (!UsePopCountInstruction) {
+    features.AddFeature("popcnt", false);
+  }
+  if (!UseCountLeadingZerosInstruction) {
+    features.AddFeature("lzcnt", false);
+  }
+  if (!UseSHA) {
+    features.AddFeature("sha", false);
+  }
 }
 
 void JeandleFuncSig::setup_description(llvm::Function* func, bool is_stub) {

@@ -29,6 +29,19 @@
 #include "runtime/arguments.hpp"
 
 void apply_vm_flag_feature_overrides(llvm::SubtargetFeatures& features) {
+  if (!UseAES) {
+    features.AddFeature("aes", false);
+  }
+  if (!UseSHA) {
+    features.AddFeature("sha2", false);
+    features.AddFeature("sha3", false);
+  }
+  if (!UseNeon) {
+    features.AddFeature("neon", false);
+  }
+  if (!UseCRC32) {
+    features.AddFeature("crc", false);
+  }
   if (!UseLSE) {
     features.AddFeature("lse", false);
   }
