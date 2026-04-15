@@ -30,8 +30,8 @@ enum class JeandleIntrinsicImplKind {
   Unsupported,
   // PureIRNode sub-kinds: inline into the current function's IR, no call boundary
   IRInstruction,    // bare LLVM IR instruction: bitcast, fmul, icmp, etc.
-  LLVMBuiltinCall,  // call to a named llvm.* builtin: fabs, abs, ctpop, sqrt, sin, ...
-  PlatformHintAsm,  // llvm::InlineAsm target hint: PAUSE (x86-64), YIELD (AArch64)
+  LLVMBuiltinCall,  // call to a named llvm.* builtin or platform-specific LLVM target intrinsic
+                    // (e.g. llvm.fabs, llvm.ctpop, llvm.x86.sse2.pause, llvm.aarch64.hint)
   // Non-PureIRNode kinds: cross call boundaries or delegate to the runtime
   HotSpotStub,
   SharedRuntime,

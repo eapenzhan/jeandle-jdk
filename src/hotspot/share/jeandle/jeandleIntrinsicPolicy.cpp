@@ -32,8 +32,7 @@ class JeandleIntrinsicPolicyHelper : public AllStatic {
     const JeandleMemorySemantics& memory = desc.semantics.memory;
 
     if (impl_kind == JeandleIntrinsicImplKind::IRInstruction ||
-        impl_kind == JeandleIntrinsicImplKind::LLVMBuiltinCall ||
-        impl_kind == JeandleIntrinsicImplKind::PlatformHintAsm) {
+        impl_kind == JeandleIntrinsicImplKind::LLVMBuiltinCall) {
       plan.mode = JeandleLoweringMode::PureLLVM;
     } else if (impl_kind == JeandleIntrinsicImplKind::HotSpotStub ||
                impl_kind == JeandleIntrinsicImplKind::SharedRuntime) {
@@ -105,9 +104,6 @@ JeandleIntrinsicDecision JeandleIntrinsicPolicy::decide(const JeandleIntrinsicDe
       if (desc.semantics.category == JeandleIntrinsicCategory::TypeCoercion) {
         k = JeandleIntrinsicImplKind::IRInstruction;
         reason = "lower to IR instruction";
-      } else if (desc.semantics.category == JeandleIntrinsicCategory::MacroSemantic) {
-        k = JeandleIntrinsicImplKind::PlatformHintAsm;
-        reason = "lower to platform hint asm";
       } else {
         k = JeandleIntrinsicImplKind::LLVMBuiltinCall;
         reason = "lower to LLVM builtin";
