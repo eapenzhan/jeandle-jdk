@@ -288,6 +288,20 @@
       true,                                                                         \
       llvm::Type::getVoidTy(context),                                               \
       llvm::PointerType::get(context, llvm::jeandle::AddrSpace::CHeapAddrSpace))    \
+                                                                                    \
+  /* StringCoding.countPositives: scalar C++ wrapper.  Receives a pointer to      \
+   * ba[off] (inside the Java heap byte array) plus the scan length; returns the   \
+   * number of leading bytes with bit 7 clear (the positive-byte prefix length).   \
+   * Marked gc-leaf: reads heap memory but performs no allocation or GC action.    \
+   * TODO(simd-stub): replace with AArch64 StubRoutines::aarch64::count_positives  \
+   * (and x86 SSE equivalent) once platform calling-convention wrappers are built. */\
+  def(JeandleRuntime_count_positives,                                               \
+      JeandleRuntimeRoutine::count_positives_impl,                                  \
+      false,                                                                        \
+      true,                                                                         \
+      llvm::Type::getInt32Ty(context),                                              \
+      llvm::PointerType::get(context, llvm::jeandle::AddrSpace::JavaHeapAddrSpace), \
+      llvm::Type::getInt32Ty(context))                                              \
 
 #define ALL_JEANDLE_ASSEMBLY_ROUTINES(def) \
   def(exceptional_return)                  \
@@ -400,6 +414,13 @@ class JeandleRuntimeRoutine : public AllStatic {
   static void multianewarrayN(Klass* elem_type, arrayOopDesc* dims, JavaThread* current);
 
   static jint instanceof_unloaded_or_null(Method* method, int cp_index, Klass* ex_klass, JavaThread* current);
+
+  // ArrayScan: count leading positive bytes in a byte array slice.
+  // ba_start  — pointer to ba[off] (inside the Java heap byte array)
+  // len       — number of bytes to scan
+  // returns   — number of consecutive bytes with bit 7 clear, i.e. the length
+  //             of the positive-byte prefix; equals len if all bytes are positive.
+  static jint count_positives_impl(jbyte* ba_start, jint len);
 
   // Assembly routine implementations:
 

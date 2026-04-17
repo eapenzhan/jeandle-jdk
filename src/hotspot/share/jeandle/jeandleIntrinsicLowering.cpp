@@ -33,6 +33,7 @@
 #include "jeandle/__hotspotHeadersBegin__.hpp"
 #include "ci/ciMethod.hpp"
 #include "jeandle/jeandle_globals.hpp"
+#include "oops/arrayOop.hpp"
 #include "runtime/stubRoutines.hpp"
 
 class JeandleIntrinsicLoweringHelper : public AllStatic {
@@ -149,6 +150,8 @@ bool JeandleIntrinsicLowering::lower(const JeandleIntrinsicDescriptor& desc,
         return lower_reference_refers_to(desc, decision);
       }
       return false;
+    case JeandleIntrinsicCategory::ArrayScan:
+      return lower_count_positives(desc, decision);
     default:
       return false;
   }
@@ -595,6 +598,55 @@ bool JeandleIntrinsicLowering::lower_reference_refers_to(const JeandleIntrinsicD
     result = emit_java_op_call(desc, decision, {reference, obj});
   }
   // JavaOp returns i32 (JVM boolean convention); push as int
+  _interp->_jvm->ipush(result);
+  return true;
+}
+
+// StringCoding.countPositives(byte[] ba, int off, int len) → int
+//
+// Computes ba_start = &ba[off] and delegates to count_positives_impl(ba_start, len)
+// via a RuntimeLeafCall (gc-leaf, no safepoint, no exception).
+//
+// Stack order (top-of-stack first): len (int), off (int), ba (aref).
+// No receiver — static method.
+//
+// Guards (deopt → interpreter re-executes the call):
+//   ba != null  |  off >= 0  |  len >= 0  |  off + len <= ba.length
+bool JeandleIntrinsicLowering::lower_count_positives(
+    const JeandleIntrinsicDescriptor& desc,
+    const JeandleIntrinsicDecision& decision) {
+  llvm::IRBuilder<>& builder = _interp->_ir_builder;
+  llvm::LLVMContext& ctx = *_interp->_context;
+
+  // Peek without popping so the jvm stack is intact when string_range_check
+  // emits uncommon_trap calls (each trap captures the deopt bundle from the
+  // current stack state, which must still hold all three arguments).
+  llvm::Value* len = _interp->_jvm->raw_peek(0).value(); // top of stack
+  llvm::Value* off = _interp->_jvm->raw_peek(1).value();
+  llvm::Value* ba  = _interp->_jvm->raw_peek(2).value();
+
+  // Emit guards: null-check ba, off >= 0, len >= 0, off + len <= ba.length.
+  // Any failing guard deopt-traps and the interpreter retries the invokestatic.
+  _interp->string_range_check(ba, off, len);
+
+  // All guards passed — consume the three invokestatic arguments.
+  _interp->_jvm->ipop(); // len
+  _interp->_jvm->ipop(); // off
+  _interp->_jvm->apop(); // ba
+
+  // Compute ba_start = ba + array_base_offset_in_bytes(T_BYTE) + off.
+  // array_base_offset is the size of the array object header; adding it gives
+  // a pointer to ba[0].  Adding off then yields ba[off].
+  llvm::Value* base_off   = builder.getInt32(arrayOopDesc::base_offset_in_bytes(T_BYTE));
+  llvm::Value* array_base = builder.CreateInBoundsPtrAdd(ba, base_off, "ba_base");
+  llvm::Value* ba_start   = builder.CreateInBoundsGEP(
+      llvm::Type::getInt8Ty(ctx), array_base, off, "ba_start");
+
+  JeandleRuntimeEntrypoint entry;
+  if (!JeandleRuntimeEntrypoints::resolve_count_positives(_interp->_module, entry)) {
+    return false;
+  }
+  llvm::CallInst* result = emit_runtime_call(desc, decision, entry, {ba_start, len});
   _interp->_jvm->ipush(result);
   return true;
 }

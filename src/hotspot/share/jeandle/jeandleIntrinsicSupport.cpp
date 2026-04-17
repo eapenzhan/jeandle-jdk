@@ -91,6 +91,14 @@ JeandleIntrinsicCapabilities JeandleIntrinsicSupport::query(const JeandleIntrins
       caps.has_hotspot_stub   = StubRoutines::dpow() != nullptr;
       caps.has_shared_runtime = CAST_FROM_FN_PTR(address, SharedRuntime::dpow) != nullptr;
       break;
+    // countPositives: our scalar C++ wrapper (count_positives_impl) is always
+    // available on all platforms.  Set has_hotspot_stub so the RuntimeLeafCall
+    // policy path chooses HotSpotStub and routes to lower_count_positives().
+    // TODO(simd-stub): when platform-native stubs with standard calling conventions
+    // become available, gate has_hotspot_stub on their runtime availability instead.
+    case vmIntrinsics::_countPositives:
+      caps.has_hotspot_stub = true;
+      break;
     default:
       break;
   }

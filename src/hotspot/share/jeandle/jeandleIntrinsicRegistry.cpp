@@ -204,6 +204,30 @@ class JeandleIntrinsicRegistryTable : public AllStatic {
     { vmIntrinsics::_PhantomReference_refersTo0,
       {JeandleIntrinsicCategory::MemorySemantic, {false, false, true}, {true, true, JeandleMemoryBarrierKind::RawReferentRead}},
       JeandleLoweringKind::JavaOperation, JeandleFallbackPolicy::NormalInvoke, false, false, "jeandle.reference_refers_to" },
+
+    // StringCoding.countPositives(byte[] ba, int off, int len) → int
+    //
+    // Returns the number of leading bytes in ba[off..off+len) with bit 7 clear
+    // (the positive-byte prefix length); returns len if all bytes are positive.
+    //
+    // Lowering: RuntimeLeafCall via a thin C++ scalar wrapper (count_positives_impl).
+    // This establishes the ArrayScan/RuntimeLeafCall category path in the framework.
+    //
+    // TODO(simd-stub): replace wrapper with platform-native SIMD stubs once
+    // standard-calling-convention variants are available:
+    //   AArch64 — StubRoutines::aarch64::count_positives() (non-standard CC today)
+    //   x86_64  — inline SSE/AVX2 via C2_MacroAssembler::count_positives
+    //
+    // Memory semantics:
+    //   has_memory_effect = true  — reads the byte array slice
+    //   needs_gc_state    = false — no GC barriers involved
+    //
+    // Control semantics:
+    //   may_deopt = false — no speculative guard in the current scalar impl
+    { vmIntrinsics::_countPositives,
+      {JeandleIntrinsicCategory::ArrayScan, {false, false}, {true, false}},
+      JeandleLoweringKind::RuntimeLeafCall, JeandleFallbackPolicy::NormalInvoke, true, false, nullptr,
+      trap_reason_mask(Deoptimization::Reason_intrinsic) },
   };
 };
 

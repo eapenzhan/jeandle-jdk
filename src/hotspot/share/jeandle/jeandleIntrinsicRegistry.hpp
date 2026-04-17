@@ -31,7 +31,8 @@ enum class JeandleIntrinsicCategory {
   TypeSemantic,
   AllocationSemantic,
   BarrierSemantic,
-  MacroSemantic
+  MacroSemantic,
+  ArrayScan       // byte-array scan intrinsics (countPositives, etc.)
 };
 
 struct JeandleControlSemantics {

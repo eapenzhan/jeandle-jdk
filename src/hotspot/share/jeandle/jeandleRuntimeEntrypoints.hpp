@@ -43,6 +43,9 @@ class JeandleRuntimeEntrypoints : public AllStatic {
                            JeandleIntrinsicImplKind impl_kind,
                            llvm::Module& module,
                            JeandleRuntimeEntrypoint& out);
+
+  static bool resolve_count_positives(llvm::Module& module,
+                                      JeandleRuntimeEntrypoint& out);
 };
 
 #endif // SHARE_JEANDLE_RUNTIME_ENTRYPOINTS_HPP
