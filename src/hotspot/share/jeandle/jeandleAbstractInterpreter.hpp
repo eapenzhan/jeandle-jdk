@@ -422,6 +422,13 @@ class JeandleAbstractInterpreter : public StackObj {
 
   void boundary_check(llvm::Value* array_oop, llvm::Value* index);
 
+  // String intrinsic slice precondition guard.
+  //   - null array       -> uncommon_trap(Reason_null_check)
+  //   - invalid off/len  -> uncommon_trap(Reason_intrinsic)
+  // Must be called while the arguments are still on the jvm stack (i.e. before any pop)
+  // so that each trap captures the correct deopt bundle for interpreter re-execution.
+  void string_range_check(llvm::Value* array_oop, llvm::Value* off, llvm::Value* len);
+
   void uncommon_trap(Deoptimization::DeoptReason, Deoptimization::DeoptAction, llvm::BasicBlock* insert_block = nullptr);
 
   void return_current(llvm::Value* value);

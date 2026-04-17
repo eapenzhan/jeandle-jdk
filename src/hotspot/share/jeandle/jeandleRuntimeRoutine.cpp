@@ -321,3 +321,23 @@ JRT_ENTRY(jint, JeandleRuntimeRoutine::instanceof_unloaded_or_null(Method* metho
   }
   return 0;
 JRT_END
+
+//-----------------------------------------------------------------------------
+// ArrayScan: count_positives_impl
+//
+// Scalar GC-leaf implementation of StringCoding.countPositives.
+// Returns the number of leading bytes with bit 7 clear (i.e. >= 0), which
+// equals len if all bytes are positive.  This is a plain C++ function with
+// standard calling convention; no JRT_ENTRY wrapper is needed because it
+// performs no allocation, does not call into the VM, and needs no JavaThread.
+//
+// TODO(simd-stub): replace with platform-native SIMD paths:
+//   AArch64 — StubRoutines::aarch64::count_positives() (non-standard CC; needs wrapper)
+//   x86_64  — inline SSE/AVX2 via C2_MacroAssembler::count_positives
+jint JeandleRuntimeRoutine::count_positives_impl(jbyte* ba_start, jint len) {
+  jint i = 0;
+  for (; i < len; i++) {
+    if (ba_start[i] < 0) break;
+  }
+  return i;
+}

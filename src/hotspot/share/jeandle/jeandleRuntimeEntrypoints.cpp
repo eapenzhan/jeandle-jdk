@@ -79,3 +79,12 @@ bool JeandleRuntimeEntrypoints::resolve_math(vmIntrinsics::ID id,
       return false;
   }
 }
+
+bool JeandleRuntimeEntrypoints::resolve_count_positives(llvm::Module& module,
+                                                         JeandleRuntimeEntrypoint& out) {
+  out.calling_conv    = runtime_cc();
+  out.is_gc_leaf      = true;
+  out.well_known_name = "count_positives";
+  out.callee = JeandleRuntimeRoutine::JeandleRuntime_count_positives_callee(module);
+  return true;
+}

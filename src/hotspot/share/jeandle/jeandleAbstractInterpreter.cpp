@@ -2858,6 +2858,63 @@ void JeandleAbstractInterpreter::boundary_check(llvm::Value* array_oop, llvm::Va
   _block->set_tail_llvm_block(boundary_check_pass);
 }
 
+void JeandleAbstractInterpreter::string_range_check(llvm::Value* array_oop,
+                                                     llvm::Value* off,
+                                                     llvm::Value* len) {
+  // Guard 1: ba != null. Keep null failures separate from intrinsic-precondition
+  // accounting so they continue to contribute to Reason_null_check statistics.
+  null_check(array_oop);
+
+  int cur_bci = _bytecodes.cur_bci();
+
+  // Guard 2: off >= 0 (deopt when off < 0).
+  {
+    llvm::BasicBlock* pass = llvm::BasicBlock::Create(*_context,
+        "bci_" + std::to_string(cur_bci) + "_off_ge0_pass", _llvm_func);
+    llvm::BasicBlock* fail = llvm::BasicBlock::Create(*_context,
+        "bci_" + std::to_string(cur_bci) + "_off_ge0_fail", _llvm_func);
+    llvm::Value* if_neg = _ir_builder.CreateICmpSLT(off, _ir_builder.getInt32(0));
+    _ir_builder.CreateCondBr(if_neg, fail, pass);
+    uncommon_trap(Deoptimization::Reason_intrinsic, Deoptimization::Action_maybe_recompile, fail);
+    _ir_builder.SetInsertPoint(pass);
+    _block->set_tail_llvm_block(pass);
+  }
+
+  // Guard 3: len >= 0 (deopt when len < 0).
+  {
+    llvm::BasicBlock* pass = llvm::BasicBlock::Create(*_context,
+        "bci_" + std::to_string(cur_bci) + "_len_ge0_pass", _llvm_func);
+    llvm::BasicBlock* fail = llvm::BasicBlock::Create(*_context,
+        "bci_" + std::to_string(cur_bci) + "_len_ge0_fail", _llvm_func);
+    llvm::Value* if_neg = _ir_builder.CreateICmpSLT(len, _ir_builder.getInt32(0));
+    _ir_builder.CreateCondBr(if_neg, fail, pass);
+    uncommon_trap(Deoptimization::Reason_intrinsic, Deoptimization::Action_maybe_recompile, fail);
+    _ir_builder.SetInsertPoint(pass);
+    _block->set_tail_llvm_block(pass);
+  }
+
+  // Guard 4: off + len <= ba.length (deopt when off + len > ba.length).
+  // Use 64-bit arithmetic to avoid i32 overflow when off and len are both close to MAX_INT.
+  // This is also an intrinsic precondition guard, not an ordinary array range check.
+  {
+    llvm::CallInst* arr_len = call_java_op("jeandle.arraylength", {array_oop});
+    llvm::Value* off64     = _ir_builder.CreateSExt(off,     _ir_builder.getInt64Ty(), "off64");
+    llvm::Value* len64     = _ir_builder.CreateSExt(len,     _ir_builder.getInt64Ty(), "len64");
+    llvm::Value* arr_len64 = _ir_builder.CreateSExt(arr_len, _ir_builder.getInt64Ty(), "arr_len64");
+    llvm::Value* sum64     = _ir_builder.CreateAdd(off64, len64, "off_plus_len");
+
+    llvm::BasicBlock* pass = llvm::BasicBlock::Create(*_context,
+        "bci_" + std::to_string(cur_bci) + "_range_check_pass", _llvm_func);
+    llvm::BasicBlock* fail = llvm::BasicBlock::Create(*_context,
+        "bci_" + std::to_string(cur_bci) + "_range_check_fail", _llvm_func);
+    llvm::Value* if_oob = _ir_builder.CreateICmpSGT(sum64, arr_len64);
+    _ir_builder.CreateCondBr(if_oob, fail, pass);
+    uncommon_trap(Deoptimization::Reason_intrinsic, Deoptimization::Action_maybe_recompile, fail);
+    _ir_builder.SetInsertPoint(pass);
+    _block->set_tail_llvm_block(pass);
+  }
+}
+
 void JeandleAbstractInterpreter::call_register_finalizer() {
   llvm::Value* receiver = _jvm->locals_at(0);
   assert(receiver != nullptr, "must have a receiver");
