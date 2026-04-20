@@ -289,16 +289,29 @@
       llvm::Type::getVoidTy(context),                                               \
       llvm::PointerType::get(context, llvm::jeandle::AddrSpace::CHeapAddrSpace))    \
                                                                                     \
-  /* StringCoding.countPositives: scalar C++ wrapper.  Receives a pointer to      \
-   * ba[off] (inside the Java heap byte array) plus the scan length; returns the   \
-   * number of leading bytes with bit 7 clear (the positive-byte prefix length).   \
-   * Marked gc-leaf: reads heap memory but performs no allocation or GC action.    \
-   * TODO(simd-stub): replace with AArch64 StubRoutines::aarch64::count_positives  \
-   * (and x86 SSE equivalent) once platform calling-convention wrappers are built. */\
+  /* StringCoding.countPositives: scalar C++ fallback wrapper.                     \
+   * Always available on all platforms; used when the platform SIMD adapter        \
+   * (JeandleRuntime_count_positives_adapter) has not been generated.              \
+   * Receives a pointer to ba[off] (inside the Java heap byte array) plus the      \
+   * scan length; returns the positive-byte prefix length.                         \
+   * Marked gc-leaf: reads heap memory but performs no allocation or GC action.  */\
   def(JeandleRuntime_count_positives,                                               \
       JeandleRuntimeRoutine::count_positives_impl,                                  \
       false,                                                                        \
       true,                                                                         \
+      llvm::Type::getInt32Ty(context),                                              \
+      llvm::PointerType::get(context, llvm::jeandle::AddrSpace::JavaHeapAddrSpace), \
+      llvm::Type::getInt32Ty(context))                                              \
+                                                                                    \
+  /* StringCoding.countPositives: platform SIMD adapter stub.                      \
+   * Address is populated at Jeandle startup by generate_count_positives_adapter();\
+   * null if not yet available (e.g., before startup or on an unsupported config). \
+   * GC-leaf registration is done manually in generate() so is_leaf=false here.   \
+   * reachable=false: stub address embedded as inttoptr constant.                */\
+  def(JeandleRuntime_count_positives_adapter,                                       \
+      JeandleRuntimeRoutine::count_positives_stub_adapter(),                        \
+      false,                                                                        \
+      false,                                                                        \
       llvm::Type::getInt32Ty(context),                                              \
       llvm::PointerType::get(context, llvm::jeandle::AddrSpace::JavaHeapAddrSpace), \
       llvm::Type::getInt32Ty(context))                                              \
@@ -421,6 +434,22 @@ class JeandleRuntimeRoutine : public AllStatic {
   // returns   — number of consecutive bytes with bit 7 clear, i.e. the length
   //             of the positive-byte prefix; equals len if all bytes are positive.
   static jint count_positives_impl(jbyte* ba_start, jint len);
+
+  // Platform-specific SIMD adapter stub for countPositives.
+  // Populated by generate_count_positives_adapter() during Jeandle startup; nullptr until then.
+  // When non-null, resolve_count_positives() routes the intrinsic through this stub instead
+  // of the scalar count_positives_impl fallback.
+  static address _count_positives_stub_adapter;
+
+ public:
+  static address count_positives_stub_adapter() { return _count_positives_stub_adapter; }
+
+ private:
+  // Generates a C-callable stub whose entry point is stored in _count_positives_stub_adapter.
+  // Adapts Jeandle's standard C ABI (ba_start, len) to the platform-specific SIMD calling
+  // convention and emits the counting code via the platform MacroAssembler.
+  // Implemented in cpu/<arch>/jeandleRuntimeRoutine_<arch>.cpp.
+  static void generate_count_positives_adapter();
 
   // Assembly routine implementations:
 
