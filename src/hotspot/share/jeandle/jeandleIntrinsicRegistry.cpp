@@ -118,6 +118,13 @@ class JeandleIntrinsicRegistryTable : public AllStatic {
       {JeandleIntrinsicCategory::MacroSemantic, {false, false}, {false, false}},
       JeandleLoweringKind::PureIRNode, JeandleFallbackPolicy::None, false, false, nullptr },
 
+    // _blackhole: optimizer constraint — consume all arguments to prevent DCE, return void.
+    // Uses volatile inline asm per argument so LLVM cannot eliminate the argument computations.
+    // MacroSemantic + PureIRNode: always supported, no deopt, no memory effects.
+    { vmIntrinsics::_blackhole,
+      {JeandleIntrinsicCategory::MacroSemantic, {false, false}, {false, false}},
+      JeandleLoweringKind::PureIRNode, JeandleFallbackPolicy::None, false, false, nullptr },
+
     // Preconditions.checkIndex(int index, int length, BiFunction exceptionFactory) -> int
     //
     // Emits a single unsigned comparison (ICMP_UGE) that covers both index < 0 and
