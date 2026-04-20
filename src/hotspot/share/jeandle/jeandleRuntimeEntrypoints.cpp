@@ -85,6 +85,11 @@ bool JeandleRuntimeEntrypoints::resolve_count_positives(llvm::Module& module,
   out.calling_conv    = runtime_cc();
   out.is_gc_leaf      = true;
   out.well_known_name = "count_positives";
-  out.callee = JeandleRuntimeRoutine::JeandleRuntime_count_positives_callee(module);
+  // Prefer the platform SIMD adapter when available; fall back to the scalar C++ wrapper.
+  if (JeandleRuntimeRoutine::count_positives_stub_adapter() != nullptr) {
+    out.callee = JeandleRuntimeRoutine::JeandleRuntime_count_positives_adapter_callee(module);
+  } else {
+    out.callee = JeandleRuntimeRoutine::JeandleRuntime_count_positives_callee(module);
+  }
   return true;
 }

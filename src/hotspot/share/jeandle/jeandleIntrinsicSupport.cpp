@@ -20,6 +20,7 @@
 #include "jeandle/jeandleIntrinsicSupport.hpp"
 
 #include "jeandle/jeandle_globals.hpp"
+#include "jeandle/jeandleRuntimeRoutine.hpp"
 
 #include "jeandle/__hotspotHeadersBegin__.hpp"
 #include "classfile/vmIntrinsics.hpp"
@@ -91,13 +92,14 @@ JeandleIntrinsicCapabilities JeandleIntrinsicSupport::query(const JeandleIntrins
       caps.has_hotspot_stub   = StubRoutines::dpow() != nullptr;
       caps.has_shared_runtime = CAST_FROM_FN_PTR(address, SharedRuntime::dpow) != nullptr;
       break;
-    // countPositives: our scalar C++ wrapper (count_positives_impl) is always
-    // available on all platforms.  Set has_hotspot_stub so the RuntimeLeafCall
-    // policy path chooses HotSpotStub and routes to lower_count_positives().
-    // TODO(simd-stub): when platform-native stubs with standard calling conventions
-    // become available, gate has_hotspot_stub on their runtime availability instead.
+    // countPositives: has_hotspot_stub is true when the platform SIMD adapter has been
+    // generated (AArch64: MacroAssembler::count_positives; x86: c2_MacroAssembler::count_positives).
+    // has_shared_runtime is always true because the scalar C++ fallback (count_positives_impl)
+    // is unconditionally available.  The policy layer will pick HotSpotStub when available,
+    // otherwise fall through to NormalInvoke via the has_shared_runtime path.
     case vmIntrinsics::_countPositives:
-      caps.has_hotspot_stub = true;
+      caps.has_hotspot_stub   = JeandleRuntimeRoutine::count_positives_stub_adapter() != nullptr;
+      caps.has_shared_runtime = true;
       break;
     default:
       break;

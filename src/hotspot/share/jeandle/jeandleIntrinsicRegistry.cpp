@@ -210,22 +210,22 @@ class JeandleIntrinsicRegistryTable : public AllStatic {
     // Returns the number of leading bytes in ba[off..off+len) with bit 7 clear
     // (the positive-byte prefix length); returns len if all bytes are positive.
     //
-    // Lowering: RuntimeLeafCall via a thin C++ scalar wrapper (count_positives_impl).
-    // This establishes the ArrayScan/RuntimeLeafCall category path in the framework.
-    //
-    // TODO(simd-stub): replace wrapper with platform-native SIMD stubs once
-    // standard-calling-convention variants are available:
-    //   AArch64 — StubRoutines::aarch64::count_positives() (non-standard CC today)
-    //   x86_64  — inline SSE/AVX2 via C2_MacroAssembler::count_positives
+    // Lowering: RuntimeLeafCall.  At startup, generate_count_positives_adapter()
+    // installs a platform-native SIMD stub adapter (AArch64: MacroAssembler::count_positives
+    // via enter/leave wrapper; x86: C2_MacroAssembler::count_positives inline SIMD).
+    // When the adapter is available the entrypoint layer routes to it; otherwise falls
+    // back to the scalar count_positives_impl.
     //
     // Memory semantics:
     //   has_memory_effect = true  — reads the byte array slice
     //   needs_gc_state    = false — no GC barriers involved
     //
     // Control semantics:
-    //   may_deopt = false — no speculative guard in the current scalar impl
+    //   may_deopt = true — precondition guards (null, off<0, len<0, off+len>length)
+    //                      emit uncommon_trap(Reason_intrinsic) which requires a deopt
+    //                      bundle so the interpreter can re-execute and throw IOOBE.
     { vmIntrinsics::_countPositives,
-      {JeandleIntrinsicCategory::ArrayScan, {false, false}, {true, false}},
+      {JeandleIntrinsicCategory::ArrayScan, {false, true}, {true, false}},
       JeandleLoweringKind::RuntimeLeafCall, JeandleFallbackPolicy::NormalInvoke, true, false, nullptr,
       trap_reason_mask(Deoptimization::Reason_intrinsic) },
   };
