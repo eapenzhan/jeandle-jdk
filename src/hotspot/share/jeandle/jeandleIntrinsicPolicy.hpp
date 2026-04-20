@@ -64,7 +64,8 @@ struct JeandleIntrinsicDecision {
 class JeandleIntrinsicPolicy : public StackObj {
  public:
   JeandleIntrinsicDecision decide(const JeandleIntrinsicDescriptor& desc,
-                                  const ciMethod* method) const;
+                                  const ciMethod* caller,
+                                  int caller_bci) const;
 
   // Refine a GuardedHybrid decision to the specific impl_kind chosen at
   // lowering time.  The caller passes the actual sub-path that was selected
