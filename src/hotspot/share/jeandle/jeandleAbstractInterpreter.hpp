@@ -87,9 +87,28 @@ class JeandleVMState : public JeandleCompilationResourceObj {
   // Untyped manipulation (for dup_x1, etc.)
   void raw_push(TypedValue tv) { _stack.push_back(tv); }
   TypedValue raw_pop() { TypedValue v = _stack.back(); _stack.pop_back(); return v; }
+  // Peek by JVM stack slot depth; long/double occupy two slots and therefore
+  // include a null placeholder at the higher slot.
   TypedValue raw_peek(size_t depth = 0) {
     assert(depth < _stack.size(), "depth out of range");
     return _stack[_stack.size() - depth - 1];
+  }
+  // Peek by logical operand depth; skips the null placeholder slot used by
+  // long/double values in the operand stack representation.
+  TypedValue peek_value(size_t value_depth = 0) {
+    size_t seen = 0;
+    for (size_t i = _stack.size(); i > 0; --i) {
+      TypedValue tv = _stack[i - 1];
+      if (tv.is_null()) {
+        continue;
+      }
+      if (seen == value_depth) {
+        return tv;
+      }
+      seen++;
+    }
+    ShouldNotReachHere();
+    return TypedValue::null_value();
   }
 
   // Local variables operations:

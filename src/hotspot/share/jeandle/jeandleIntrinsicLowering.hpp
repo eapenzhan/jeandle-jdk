@@ -52,6 +52,8 @@ class JeandleIntrinsicLowering : public StackObj {
                               const JeandleIntrinsicDecision& decision);
   bool lower_macro_semantic(const JeandleIntrinsicDescriptor& desc,
                             const JeandleIntrinsicDecision& decision);
+  bool lower_preconditions_check_index(const JeandleIntrinsicDescriptor& desc,
+                                       const JeandleIntrinsicDecision& decision);
   // Platform-specific spin-wait hint emission.
   // Implemented in cpu/<arch>/jeandleIntrinsicLowering_<arch>.cpp.
   bool lower_spin_wait_hint(const JeandleIntrinsicDescriptor& desc,

@@ -438,14 +438,149 @@ bool JeandleIntrinsicLowering::lower_barrier_semantic(const JeandleIntrinsicDesc
 
 bool JeandleIntrinsicLowering::lower_macro_semantic(const JeandleIntrinsicDescriptor& desc,
                                                     const JeandleIntrinsicDecision& decision) {
-  llvm::LLVMContext& ctx = *_interp->_context;
-  llvm::IRBuilder<>& builder = _interp->_ir_builder;
   switch (desc.id) {
     case vmIntrinsics::_onSpinWait:
       return lower_spin_wait_hint(desc, decision);
+    case vmIntrinsics::_Preconditions_checkIndex:
+    case vmIntrinsics::_Preconditions_checkLongIndex:
+      return lower_preconditions_check_index(desc, decision);
     default:
       return false;
   }
+}
+
+// Preconditions.checkIndex(int|long index, int|long length, BiFunction exceptionFactory)
+//   -> int|long
+//
+// The condition to guard is: index < 0 || index >= length
+//
+// Naive single unsigned compare (uint)index >= (uint)length only works when
+// length >= 0.  When length < 0 the unsigned value is huge so any non-negative
+// index passes the check — wrong.
+//
+// Correct guard: length < 0 || (uint)index >= (uint)length
+//   • length < 0 fires unconditionally when the caller passes a negative bound.
+//   • (uint)index >= (uint)length, given length >= 0, covers index < 0 (negative
+//     index becomes a large unsigned value) and index >= length.
+//
+// This aligns with C2: C2 uses the unsigned shortcut only after range analysis
+// has proved length >= 0; without that proof it guards length explicitly.
+// C1 uses two separate signed comparisons — semantically equivalent.
+//
+// On the pass path we emit two llvm.assume calls to tell the optimiser that the
+// return value (index) satisfies  0 <= index < length.  This allows LLVM to fold
+// downstream array bounds checks that use the same index.
+bool JeandleIntrinsicLowering::lower_preconditions_check_index(
+    const JeandleIntrinsicDescriptor& desc,
+    const JeandleIntrinsicDecision& decision) {
+  llvm::IRBuilder<>& builder = _interp->_ir_builder;
+  llvm::LLVMContext& ctx = *_interp->_context;
+  int cur_bci = _interp->_bytecodes.cur_bci();
+  bool is_long = desc.id == vmIntrinsics::_Preconditions_checkLongIndex;
+
+  // Stack (top-of-stack first): exceptionFactory (aref), length (int|long),
+  // index (int|long).
+  // Use logical-value peeks so the stack remains intact when uncommon_trap
+  // captures the deopt bundle via create_current_deopt_bundle() ->
+  // _jvm->deopt_args(). This is required for the long variant because Jeandle's
+  // operand stack models long values with an extra null high-slot placeholder.
+  // The actual pops are deferred to the pass path below, matching the pattern
+  // used by do_array_load / do_array_store / instanceof.
+  llvm::Value* exception_factory = _interp->_jvm->peek_value(0).value(); // BiFunction — not used in fast path
+  llvm::Value* length            = _interp->_jvm->peek_value(1).value();
+  llvm::Value* index             = _interp->_jvm->peek_value(2).value();
+  (void)exception_factory;
+
+  llvm::Type* integer_ty = is_long ? llvm::Type::getInt64Ty(ctx)
+                                   : llvm::Type::getInt32Ty(ctx);
+  llvm::Value* zero = llvm::ConstantInt::get(integer_ty, 0);
+
+  // Create the guard blocks.
+  //
+  // Two-level check to distinguish precondition failure (length < 0) from
+  // true range failure (index out of bounds), mirroring C2's distinction
+  // between Reason_intrinsic and Reason_range_check.
+  //
+  // Control flow:
+  //   entry ─(len<0)──► fail_pre  [Reason_intrinsic]
+  //         ─(len≥0)──► mid
+  //                       ─(idx oob)──► fail_range  [Reason_range_check]
+  //                       ─(in range)──► pass
+  llvm::BasicBlock* pass = llvm::BasicBlock::Create(ctx,
+      "bci_" + std::to_string(cur_bci) + "_checkIndex_pass", _interp->_llvm_func);
+  llvm::BasicBlock* mid  = llvm::BasicBlock::Create(ctx,
+      "bci_" + std::to_string(cur_bci) + "_checkIndex_mid", _interp->_llvm_func);
+  llvm::BasicBlock* fail_pre = llvm::BasicBlock::Create(ctx,
+      "bci_" + std::to_string(cur_bci) + "_checkIndex_fail_pre", _interp->_llvm_func);
+  llvm::BasicBlock* fail_range = llvm::BasicBlock::Create(ctx,
+      "bci_" + std::to_string(cur_bci) + "_checkIndex_fail_range", _interp->_llvm_func);
+
+  // First guard: length < 0 → precondition failure.
+  llvm::Value* len_neg = builder.CreateICmp(llvm::CmpInst::ICMP_SLT, length, zero,
+                                            "checkIndex.len_neg");
+  llvm::BranchInst* br_len = builder.CreateCondBr(len_neg, fail_pre, mid);
+  annotate_generated_instruction(*br_len, desc, decision);
+
+  // mid: length >= 0 is guaranteed here; unsigned compare covers index < 0 and index >= length.
+  builder.SetInsertPoint(mid);
+  llvm::Value* idx_oob = builder.CreateICmp(llvm::CmpInst::ICMP_UGE, index, length,
+                                            "checkIndex.idx_oob");
+  llvm::BranchInst* br_idx = builder.CreateCondBr(idx_oob, fail_range, pass);
+  annotate_generated_instruction(*br_idx, desc, decision);
+
+  // fail_pre: intrinsic precondition failed (length < 0).
+  // Mirrors C2's Reason_intrinsic path; too_many_traps of this reason triggers
+  // NormalInvoke fallback in decide() above.
+  _interp->uncommon_trap(Deoptimization::Reason_intrinsic,
+                         Deoptimization::Action_maybe_recompile, fail_pre);
+
+  // fail_range: true range check failure (index out of bounds).
+  _interp->uncommon_trap(Deoptimization::Reason_range_check,
+                         Deoptimization::Action_maybe_recompile, fail_range);
+
+  // Pass path: guards passed — consume the three invokevirtual arguments, then
+  // push the validated index as the intrinsic's return value.
+  builder.SetInsertPoint(pass);
+  _interp->_block->set_tail_llvm_block(pass);
+  _interp->_jvm->apop(); // exception_factory
+  if (is_long) {
+    _interp->_jvm->lpop(); // length
+    _interp->_jvm->lpop(); // index (value already captured via raw_peek above)
+  } else {
+    _interp->_jvm->ipop(); // length
+    _interp->_jvm->ipop(); // index (value already captured via raw_peek above)
+  }
+
+  // Express  length >= 0, 0 <= index < length  as llvm.assume facts.
+  // These serve as supplementary hints for SCEV, LVI, and CVP:
+  //   - assume(length >= 0): supplements the control-flow fact established in
+  //     mid block; helps SCEV and LVI when length is used downstream.
+  //   - assume(index >= 0) + assume(index < length): let CVP eliminate a
+  //     boundary_check whose arr_len is GVN-proved equal to length.
+  //
+  // TODO: llvm.assume has fragile propagation semantics — these
+  // facts are block-local annotations that do not flow through def-use chains
+  // across calls or PHI merges.  A more robust future approach is to introduce
+  // a @llvm.jeandle.checked_index refined-value intrinsic (analogous to C2's
+  // ConstraintCastNode) that carries the range fact in the def-use chain itself,
+  // consumed by a dedicated Jeandle BCE pass.  Until then, the assumes below
+  // serve as the primary range-fact delivery mechanism.
+  llvm::Value* len_nonneg = builder.CreateICmp(llvm::CmpInst::ICMP_SGE, length, zero,
+                                               "checkIndex.len_nonneg");
+  llvm::Value* non_neg    = builder.CreateICmp(llvm::CmpInst::ICMP_SGE, index, zero,
+                                               "checkIndex.nonneg");
+  llvm::Value* below_len  = builder.CreateICmp(llvm::CmpInst::ICMP_SLT, index, length,
+                                               "checkIndex.below_len");
+  builder.CreateIntrinsic(llvm::Intrinsic::assume, llvm::ArrayRef<llvm::Type*>{}, {len_nonneg});
+  builder.CreateIntrinsic(llvm::Intrinsic::assume, llvm::ArrayRef<llvm::Type*>{}, {non_neg});
+  builder.CreateIntrinsic(llvm::Intrinsic::assume, llvm::ArrayRef<llvm::Type*>{}, {below_len});
+
+  if (is_long) {
+    _interp->_jvm->lpush(index);
+  } else {
+    _interp->_jvm->ipush(index);
+  }
+  return true;
 }
 
 bool JeandleIntrinsicLowering::lower_reference_refers_to(const JeandleIntrinsicDescriptor& desc,

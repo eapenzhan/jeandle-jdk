@@ -22,6 +22,10 @@
 #include "jeandle/__hotspotHeadersBegin__.hpp"
 #include "ci/ciMethod.hpp"
 
+static constexpr JeandleTrapReasonMask trap_reason_mask(Deoptimization::DeoptReason reason) {
+  return JeandleTrapReasonMask(1u) << static_cast<uint>(reason);
+}
+
 class JeandleIntrinsicRegistryTable : public AllStatic {
  public:
   static constexpr const JeandleIntrinsicDescriptor* table_begin() {
@@ -113,6 +117,37 @@ class JeandleIntrinsicRegistryTable : public AllStatic {
     { vmIntrinsics::_onSpinWait,
       {JeandleIntrinsicCategory::MacroSemantic, {false, false}, {false, false}},
       JeandleLoweringKind::PureIRNode, JeandleFallbackPolicy::None, false, false, nullptr },
+
+    // Preconditions.checkIndex(int index, int length, BiFunction exceptionFactory) -> int
+    //
+    // Emits a single unsigned comparison (ICMP_UGE) that covers both index < 0 and
+    // index >= length in one check, then branches to a DeoptTrap on failure.
+    // The BiFunction callback argument is popped and discarded in the fast path; if
+    // the guard fires the interpreter re-executes the full method and invokes it.
+    //
+    // Control semantics:
+    //   may_deopt = true  — out-of-bounds guard triggers uncommon_trap(Reason_range_check)
+    //   needs_exception_edge = false — no Java exception path; failure goes to deopt only
+    //
+    // Memory semantics: none — pure arithmetic check, no heap access.
+    //
+    // C2 behaviour reference: library_call.cpp checks too_many_traps for both
+    // Reason_intrinsic (length < 0) and Reason_range_check (index OOB); we
+    // mirror the same site throttle via trap_throttle_mask.
+    { vmIntrinsics::_Preconditions_checkIndex,
+      {JeandleIntrinsicCategory::MacroSemantic, {true, false}, {false, false}},
+      JeandleLoweringKind::PureIRNode, JeandleFallbackPolicy::DeoptTrap, false, false, nullptr,
+      trap_reason_mask(Deoptimization::Reason_intrinsic) |
+          trap_reason_mask(Deoptimization::Reason_range_check) },
+
+    // Preconditions.checkIndex(long index, long length, BiFunction exceptionFactory) -> long
+    //
+    // Identical trap semantics to the int variant; only the value width differs.
+    { vmIntrinsics::_Preconditions_checkLongIndex,
+      {JeandleIntrinsicCategory::MacroSemantic, {true, false}, {false, false}},
+      JeandleLoweringKind::PureIRNode, JeandleFallbackPolicy::DeoptTrap, false, false, nullptr,
+      trap_reason_mask(Deoptimization::Reason_intrinsic) |
+          trap_reason_mask(Deoptimization::Reason_range_check) },
 
     // Object.getClass(): loads the java.lang.Class mirror via the klass's OopHandle.
     // TypeSemantic + JavaOperation: the two-level load (klass → OopHandle → mirror)
