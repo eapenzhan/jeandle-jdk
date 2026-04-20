@@ -1613,7 +1613,7 @@ bool JeandleAbstractInterpreter::try_lower_intrinsic(const ciMethod* target) {
   }
 
   JeandleIntrinsicPolicy policy;
-  JeandleIntrinsicDecision decision = policy.decide(*desc, target);
+  JeandleIntrinsicDecision decision = policy.decide(*desc, _method, _bytecodes.cur_bci());
   if (!decision.supported) {
     return false;
   }

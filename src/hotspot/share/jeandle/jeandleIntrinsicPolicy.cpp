@@ -22,6 +22,8 @@
 
 #include "jeandle/__hotspotHeadersBegin__.hpp"
 #include "ci/ciMethod.hpp"
+#include "ci/ciMethodData.hpp"
+#include "runtime/deoptimization.hpp"
 
 class JeandleIntrinsicPolicyHelper : public AllStatic {
  public:
@@ -81,6 +83,21 @@ class JeandleIntrinsicPolicyHelper : public AllStatic {
     return {false, JeandleIntrinsicImplKind::Unsupported,
             make_plan(desc, JeandleIntrinsicImplKind::Unsupported), reason};
   }
+
+  // Mirrors Compile::too_many_traps(caller_method, bci, reason):
+  //   1. per-BCI check: has_trap_at(bci, nullptr, reason) != 0 → true immediately
+  //   2. aggregate fallback: trap_count(reason) >= per_method_trap_limit(reason)
+  // Keyed on the CALLER method and invoke-site BCI, not the callee MDO, so one
+  // hot caller cannot disable the intrinsic for all other call sites.
+  // For non-speculate reasons (Reason_intrinsic, Reason_range_check) m = nullptr.
+  static bool too_many_traps_at(const ciMethod* caller, int bci,
+                                 Deoptimization::DeoptReason reason) {
+    if (caller == nullptr) return false;
+    ciMethodData* md = const_cast<ciMethod*>(caller)->method_data();
+    if (md == nullptr || md->is_empty()) return false;
+    if (md->has_trap_at(bci, nullptr, reason) != 0) return true;
+    return md->trap_count(reason) >= Deoptimization::per_method_trap_limit(reason);
+  }
 };
 
 JeandleIntrinsicDecision JeandleIntrinsicPolicy::refine(const JeandleIntrinsicDecision& base,
@@ -92,11 +109,20 @@ JeandleIntrinsicDecision JeandleIntrinsicPolicy::refine(const JeandleIntrinsicDe
 }
 
 JeandleIntrinsicDecision JeandleIntrinsicPolicy::decide(const JeandleIntrinsicDescriptor& desc,
-                                                        const ciMethod* method) const {
-  (void)method;
-
+                                                        const ciMethod* caller,
+                                                        int caller_bci) const {
   switch (desc.lowering_kind) {
     case JeandleLoweringKind::PureIRNode: {
+      // too_many_traps throttle for Preconditions.checkIndex: bail to NormalInvoke
+      // when the invoke site (caller+bci) has recorded a Reason_intrinsic trap.
+      // Mirrors C2's inline_preconditions_checkIndex / too_many_traps(method,bci) logic.
+      if (desc.id == vmIntrinsics::_Preconditions_checkIndex &&
+          JeandleIntrinsicPolicyHelper::too_many_traps_at(
+              caller, caller_bci, Deoptimization::Reason_intrinsic)) {
+        return JeandleIntrinsicPolicyHelper::unsupported(desc,
+            "too many Reason_intrinsic traps at caller site: bail to NormalInvoke");
+      }
+
       // PureIRNode intrinsics are unconditionally supported; the impl_kind is
       // determined by category alone (no capability query needed).
       JeandleIntrinsicImplKind k;
@@ -112,6 +138,17 @@ JeandleIntrinsicDecision JeandleIntrinsicPolicy::decide(const JeandleIntrinsicDe
     }
 
     case JeandleLoweringKind::RuntimeLeafCall: {
+      // too_many_traps throttle: any RuntimeLeafCall with may_deopt=true emits
+      // uncommon_trap(Reason_intrinsic) on guard failure.  Bail to the fallback
+      // policy (NormalInvoke for countPositives) when the caller+bci has recorded
+      // a trap, matching C2's inline_countPositives() / too_many_traps(method,bci).
+      if (desc.semantics.control.may_deopt &&
+          JeandleIntrinsicPolicyHelper::too_many_traps_at(
+              caller, caller_bci, Deoptimization::Reason_intrinsic)) {
+        return JeandleIntrinsicPolicyHelper::unsupported(desc,
+            "too many Reason_intrinsic traps at caller site: bail to NormalInvoke");
+      }
+
       // Query capabilities once; apply preference rules.
       JeandleIntrinsicCapabilities caps = JeandleIntrinsicSupport::query(desc);
       if (!caps.any_path()) {
