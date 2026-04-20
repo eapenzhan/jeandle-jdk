@@ -299,6 +299,88 @@ DEF_JAVA_OP(reference_get, 1,
   ir_builder.CreateRet(referent);
 JAVA_OP_END
 
+// Array.newInstance(Class<?> componentType, int length) → Object
+//
+// Fast path: if the array klass has already been cached in the component-type mirror
+//   (java_lang_Class::array_klass_offset), call new_array_callee directly.
+// Slow path: klass not yet cached → call new_array_from_mirror_callee, which invokes
+//   Reflection::reflect_new_array to resolve the klass and allocate.
+//
+// The acquire load on the klass field matches java_lang_Class::array_klass_acquire
+// in HotSpot, ensuring we see a fully published Klass* if another thread has stored one.
+DEF_JAVA_OP(new_array, 1, llvm::PointerType::get(context, llvm::jeandle::AddrSpace::JavaHeapAddrSpace),
+            llvm::PointerType::get(context, llvm::jeandle::AddrSpace::JavaHeapAddrSpace), // mirror (component Class)
+            llvm::Type::getInt32Ty(context))                                              // length
+  llvm::Value* mirror = func->getArg(0);
+  llvm::Value* length = func->getArg(1);
+
+  // Load the array_klass offset global and current thread early (no null dependency).
+  llvm::GlobalVariable* offset_gv = template_module.getGlobalVariable("java_lang_Class.array_klass_offset", /*AllowInternal=*/true);
+  if (!offset_gv) {
+    RuntimeDefinedJavaOps::set_failed("java_lang_Class.array_klass_offset global not found in template module");
+    return;
+  }
+  llvm::Value* offset = ir_builder.CreateLoad(ir_builder.getInt32Ty(), offset_gv);
+
+  llvm::Function* current_thread_func = template_module.getFunction("jeandle.current_thread");
+  if (!current_thread_func) {
+    RuntimeDefinedJavaOps::set_failed("jeandle.current_thread is not found in template module");
+    return;
+  }
+  llvm::CallInst* current_thread = ir_builder.CreateCall(current_thread_func);
+  current_thread->setCallingConv(llvm::CallingConv::Hotspot_JIT);
+
+  llvm::PointerType* java_heap_ptr_ty = llvm::PointerType::get(context, llvm::jeandle::AddrSpace::JavaHeapAddrSpace);
+  llvm::PointerType* c_heap_ptr_ty    = llvm::PointerType::get(context, llvm::jeandle::AddrSpace::CHeapAddrSpace);
+
+  llvm::BasicBlock* klass_load_bb = llvm::BasicBlock::Create(context, "new_array_klass_load", func);
+  llvm::BasicBlock* fast_bb       = llvm::BasicBlock::Create(context, "new_array_fast",       func);
+  llvm::BasicBlock* slow_bb       = llvm::BasicBlock::Create(context, "new_array_slow",       func);
+  llvm::BasicBlock* merge_bb      = llvm::BasicBlock::Create(context, "new_array_merge",      func);
+
+  // Null guard: a null mirror must throw NPE; route directly to slow path which
+  // calls Reflection::reflect_new_array(null, length) → throws NullPointerException.
+  // This avoids forming a GEP from a null base pointer (which is IR-level UB).
+  llvm::Value* mirror_is_null = ir_builder.CreateICmpEQ(
+      mirror, llvm::ConstantPointerNull::get(java_heap_ptr_ty));
+  ir_builder.CreateCondBr(mirror_is_null, slow_bb, klass_load_bb);
+
+  // Klass-load block: mirror is non-null, safe to GEP and acquire-load the cached klass.
+  ir_builder.SetInsertPoint(klass_load_bb);
+  llvm::Value* klass_field_addr = ir_builder.CreateInBoundsGEP(ir_builder.getInt8Ty(), mirror, offset);
+  llvm::LoadInst* klass = ir_builder.CreateLoad(c_heap_ptr_ty, klass_field_addr);
+  klass->setAtomic(llvm::AtomicOrdering::Acquire);
+  klass->setAlignment(llvm::Align(sizeof(void*)));
+  llvm::Value* klass_is_null = ir_builder.CreateICmpEQ(klass, llvm::ConstantPointerNull::get(c_heap_ptr_ty));
+  ir_builder.CreateCondBr(klass_is_null, slow_bb, fast_bb);
+
+  // Fast path: array klass is known — call new_array directly.
+  ir_builder.SetInsertPoint(fast_bb);
+  llvm::CallInst* fast_result = ir_builder.CreateCall(
+      JeandleRuntimeRoutine::new_array_callee(template_module),
+      {klass, length, current_thread},
+      {create_empty_deopt_bundle()});
+  fast_result->setCallingConv(llvm::CallingConv::Hotspot_JIT);
+  ir_builder.CreateBr(merge_bb);
+
+  // Slow path: mirror is null or klass not yet resolved — delegate to
+  // Reflection::reflect_new_array, which handles NPE and klass resolution.
+  ir_builder.SetInsertPoint(slow_bb);
+  llvm::CallInst* slow_result = ir_builder.CreateCall(
+      JeandleRuntimeRoutine::new_array_from_mirror_callee(template_module),
+      {mirror, length, current_thread},
+      {create_empty_deopt_bundle()});
+  slow_result->setCallingConv(llvm::CallingConv::Hotspot_JIT);
+  ir_builder.CreateBr(merge_bb);
+
+  // Merge results via PHI.
+  ir_builder.SetInsertPoint(merge_bb);
+  llvm::PHINode* result = ir_builder.CreatePHI(java_heap_ptr_ty, 2);
+  result->addIncoming(fast_result, fast_bb);
+  result->addIncoming(slow_result, slow_bb);
+  ir_builder.CreateRet(result);
+JAVA_OP_END
+
 } // anonymous namespace
 
 const char* RuntimeDefinedJavaOps::_error_msg = nullptr;
@@ -322,6 +404,7 @@ bool RuntimeDefinedJavaOps::define_all(llvm::Module& template_module) {
   define_get_class(template_module);
   define_reference_refers_to(template_module);
   define_reference_get(template_module);
+  define_new_array(template_module);
 
   return failed();
 }
@@ -382,6 +465,7 @@ void RuntimeDefinedJavaOps::define_global_variables(llvm::Module& template_modul
   define_global("oopDesc.klass_offset_in_bytes",                    int32_type, static_cast<uint64_t>(oopDesc::klass_offset_in_bytes()));
   define_global("oopDesc.mark_offset_in_bytes",                     int32_type, static_cast<uint64_t>(oopDesc::mark_offset_in_bytes()));
   define_global("java_lang_ref_Reference.referent_offset",          int32_type, static_cast<uint64_t>(java_lang_ref_Reference::referent_offset()));
+  define_global("java_lang_Class.array_klass_offset",               int32_type, static_cast<uint64_t>(java_lang_Class::array_klass_offset()));
   define_global("BasicLock.displaced_header_offset_in_bytes",       int32_type, static_cast<uint64_t>(BasicLock::displaced_header_offset_in_bytes()));
   define_global("JavaThread.held_monitor_count_offset",             int32_type, static_cast<uint64_t>(JavaThread::held_monitor_count_offset()));
   define_global("JavaThread.lock_stack_end",                        int32_type, static_cast<uint64_t>(LockStack::end_offset()));

@@ -57,6 +57,8 @@ class JeandleIntrinsicLowering : public StackObj {
                                        const JeandleIntrinsicDecision& decision);
   bool lower_count_positives(const JeandleIntrinsicDescriptor& desc,
                              const JeandleIntrinsicDecision& decision);
+  bool lower_new_array(const JeandleIntrinsicDescriptor& desc,
+                       const JeandleIntrinsicDecision& decision);
   bool lower_blackhole(const JeandleIntrinsicDescriptor& desc,
                        const JeandleIntrinsicDecision& decision);
   // Platform-specific spin-wait hint emission.

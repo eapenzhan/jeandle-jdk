@@ -68,6 +68,11 @@
 @VMOptions.ZeroTLAB = external global i1
 @java_lang_ref_Reference.referent_offset = external global i32
 
+; Byte offset of the cached array klass in java.lang.Class (injected field).
+; Stores the array Klass* for this component type once the array type has been loaded.
+; Zero/null means the array klass has not yet been resolved.
+@java_lang_Class.array_klass_offset = external global i32
+
 ; Byte offsets for BasicLock structure fields.
 @BasicLock.displaced_header_offset_in_bytes = external global i32
 

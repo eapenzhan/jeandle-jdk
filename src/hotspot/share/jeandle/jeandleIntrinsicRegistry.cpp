@@ -212,6 +212,25 @@ class JeandleIntrinsicRegistryTable : public AllStatic {
       {JeandleIntrinsicCategory::MemorySemantic, {false, false, true}, {true, true, JeandleMemoryBarrierKind::RawReferentRead}},
       JeandleLoweringKind::JavaOperation, JeandleFallbackPolicy::NormalInvoke, false, false, "jeandle.reference_refers_to" },
 
+    // Array.newInstance(Class<?> componentType, int length) → Object
+    //
+    // Establishes AllocationSemantic category.  The JavaOp jeandle.new_array loads the
+    // cached array klass from the component-type mirror and calls new_array on the fast
+    // path; if the klass is not yet cached it falls back to Reflection::reflect_new_array.
+    //
+    // Control semantics:
+    //   may_deopt              = false — guards are inside the JavaOp, not deopt-emitting
+    //   needs_exception_edge   = true  — NegativeArraySizeException / NullPointerException /
+    //                                    IllegalArgumentException may be thrown by the runtime
+    //
+    // Memory semantics:
+    //   has_memory_effect = true  — allocates heap memory
+    //   needs_gc_state    = false — no GC barriers required at this level; the runtime
+    //                               call handles allocation-time GC interaction
+    { vmIntrinsics::_newArray,
+      {JeandleIntrinsicCategory::AllocationSemantic, {false, true}, {true, false}},
+      JeandleLoweringKind::JavaOperation, JeandleFallbackPolicy::NormalInvoke, false, false, "jeandle.new_array" },
+
     // StringCoding.countPositives(byte[] ba, int off, int len) → int
     //
     // Returns the number of leading bytes in ba[off..off+len) with bit 7 clear

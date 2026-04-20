@@ -67,6 +67,13 @@
       llvm::Type::getInt32Ty(context),                                              \
       llvm::PointerType::get(context, llvm::jeandle::AddrSpace::CHeapAddrSpace))    \
                                                                                     \
+  def(new_array_from_mirror,                                                        \
+      JeandleRuntimeRoutine::new_array_from_mirror,                                 \
+      llvm::PointerType::get(context, llvm::jeandle::AddrSpace::JavaHeapAddrSpace), \
+      llvm::PointerType::get(context, llvm::jeandle::AddrSpace::JavaHeapAddrSpace), \
+      llvm::Type::getInt32Ty(context),                                              \
+      llvm::PointerType::get(context, llvm::jeandle::AddrSpace::CHeapAddrSpace))    \
+                                                                                    \
   def(multianewarray2,                                                              \
       JeandleRuntimeRoutine::multianewarray2,                                       \
       llvm::PointerType::get(context, llvm::jeandle::AddrSpace::JavaHeapAddrSpace), \
@@ -418,6 +425,10 @@ class JeandleRuntimeRoutine : public AllStatic {
   // Array allocation routine
   static void new_instance(InstanceKlass* klass, JavaThread* current);
   static void new_array(Klass* array_type, int length, JavaThread* current);
+  // Slow-path array allocation: resolves the array klass from the component-type mirror
+  // (java.lang.Class) and allocates via Reflection::reflect_new_array.  Used when the
+  // cached array_klass field in the mirror has not been populated yet.
+  static void new_array_from_mirror(oopDesc* mirror, int length, JavaThread* current);
 
   // Multi-dimensional array allocation routines
   static void multianewarray2(Klass* elem_type, int len1, int len2, JavaThread* current);
