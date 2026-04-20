@@ -33,6 +33,7 @@ class ciMethod;
 
 class JeandleIntrinsicLowering : public StackObj {
   JeandleAbstractInterpreter* _interp;
+  const ciMethod* _target;
 
   bool lower_pure_math(const JeandleIntrinsicDescriptor& desc,
                        const JeandleIntrinsicDecision& decision);
@@ -56,6 +57,8 @@ class JeandleIntrinsicLowering : public StackObj {
                                        const JeandleIntrinsicDecision& decision);
   bool lower_count_positives(const JeandleIntrinsicDescriptor& desc,
                              const JeandleIntrinsicDecision& decision);
+  bool lower_blackhole(const JeandleIntrinsicDescriptor& desc,
+                       const JeandleIntrinsicDecision& decision);
   // Platform-specific spin-wait hint emission.
   // Implemented in cpu/<arch>/jeandleIntrinsicLowering_<arch>.cpp.
   bool lower_spin_wait_hint(const JeandleIntrinsicDescriptor& desc,
@@ -81,7 +84,7 @@ class JeandleIntrinsicLowering : public StackObj {
 
  public:
   explicit JeandleIntrinsicLowering(JeandleAbstractInterpreter* interp)
-    : _interp(interp) {}
+    : _interp(interp), _target(nullptr) {}
 
   bool lower(const JeandleIntrinsicDescriptor& desc,
              const JeandleIntrinsicDecision& decision,

@@ -22,6 +22,7 @@
 #include "jeandle/__llvmHeadersBegin__.hpp"
 #include "llvm/Analysis/ConstantFolding.h"
 #include "llvm/IR/Constants.h"
+#include "llvm/IR/InlineAsm.h"
 
 #include "jeandle/jeandleAbstractInterpreter.hpp"
 #include "jeandle/jeandleIntrinsicIRSemantics.hpp"
@@ -32,6 +33,7 @@
 
 #include "jeandle/__hotspotHeadersBegin__.hpp"
 #include "ci/ciMethod.hpp"
+#include "ci/ciSignature.hpp"
 #include "jeandle/jeandle_globals.hpp"
 #include "oops/arrayOop.hpp"
 #include "runtime/stubRoutines.hpp"
@@ -121,7 +123,7 @@ llvm::InvokeInst* JeandleIntrinsicLowering::emit_java_op_invoke(const JeandleInt
 bool JeandleIntrinsicLowering::lower(const JeandleIntrinsicDescriptor& desc,
                                      const JeandleIntrinsicDecision& decision,
                                      const ciMethod* target) {
-  (void)target;
+  _target = target;
   switch (desc.semantics.category) {
     case JeandleIntrinsicCategory::PureMath:
       return lower_pure_math(desc, decision);
@@ -447,6 +449,8 @@ bool JeandleIntrinsicLowering::lower_macro_semantic(const JeandleIntrinsicDescri
     case vmIntrinsics::_Preconditions_checkIndex:
     case vmIntrinsics::_Preconditions_checkLongIndex:
       return lower_preconditions_check_index(desc, decision);
+    case vmIntrinsics::_blackhole:
+      return lower_blackhole(desc, decision);
     default:
       return false;
   }
@@ -650,3 +654,60 @@ bool JeandleIntrinsicLowering::lower_count_positives(
   _interp->_jvm->ipush(result);
   return true;
 }
+
+// _blackhole: consume all arguments via volatile inline asm to prevent DCE.
+// Each argument is passed through "r,~{memory}" volatile asm so LLVM cannot
+// eliminate the computation that produced it.  Float/double are bitcast to
+// integer types first because "r" is an integer register constraint.
+// The receiver (if any) is consumed last after all typed parameters.
+bool JeandleIntrinsicLowering::lower_blackhole(const JeandleIntrinsicDescriptor& desc,
+                                               const JeandleIntrinsicDecision& decision) {
+  llvm::IRBuilder<>& builder = _interp->_ir_builder;
+  llvm::LLVMContext& ctx = *_interp->_context;
+
+  ciSignature* sig = _target->signature();
+
+  // Pop parameters in reverse order (last param = top of stack).
+  for (int i = sig->count() - 1; i >= 0; i--) {
+    BasicType bt = sig->type_at(i)->basic_type();
+    llvm::Value* val;
+    switch (bt) {
+      case T_INT: case T_BOOLEAN: case T_BYTE: case T_CHAR: case T_SHORT:
+        val = _interp->_jvm->ipop();
+        break;
+      case T_LONG:
+        val = _interp->_jvm->lpop();
+        break;
+      case T_FLOAT:
+        val = builder.CreateBitCast(_interp->_jvm->fpop(), builder.getInt32Ty());
+        break;
+      case T_DOUBLE:
+        val = builder.CreateBitCast(_interp->_jvm->dpop(), builder.getInt64Ty());
+        break;
+      case T_OBJECT: case T_ARRAY:
+        val = _interp->_jvm->apop();
+        break;
+      default:
+        return false;
+    }
+    auto* fn_ty = llvm::FunctionType::get(
+        llvm::Type::getVoidTy(ctx), {val->getType()}, false);
+    // No ~{memory} clobber: blackhole must keep SSA values live (prevent DCE)
+    // but must not act as a memory barrier. C2 models this as a control-only
+    // use with no memory effects; omitting ~{memory} preserves that contract
+    // so LLVM can still move loads/stores freely across the blackhole call.
+    auto* ia = llvm::InlineAsm::get(fn_ty, "", "r",
+                                    /*hasSideEffects=*/true);
+    llvm::CallInst* call = builder.CreateCall(ia, {val});
+    annotate_generated_instruction(*call, desc, decision);
+  }
+
+  // Consume the receiver for non-static blackhole calls.
+  if (!_target->is_static()) {
+    _interp->_jvm->apop();
+  }
+
+  // void return: nothing to push on the JVM operand stack
+  return true;
+}
+
