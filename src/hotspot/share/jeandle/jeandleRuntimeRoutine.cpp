@@ -22,7 +22,9 @@
 #include "jeandle/jeandleRuntimeRoutine.hpp"
 
 #include "jeandle/__hotspotHeadersBegin__.hpp"
+#include "classfile/javaClasses.hpp"
 #include "memory/oopFactory.hpp"
+#include "runtime/reflection.hpp"
 #include "runtime/sharedRuntime.hpp"
 #include "runtime/stubRoutines.hpp"
 #include "runtime/frame.hpp"
@@ -175,6 +177,25 @@ JRT_BLOCK_ENTRY(void, JeandleRuntimeRoutine::new_array(Klass* array_type, int le
   JRT_BLOCK_END;
 
   // inform GC that we won't do card marks for initializing writes.
+  SharedRuntime::on_slowpath_allocation_exit(current);
+JRT_END
+
+// Array allocation from a component-type mirror (java.lang.Class).
+// Called as the slow path when the cached array_klass field in the mirror is null.
+// Delegates to Reflection::reflect_new_array which handles klass resolution, primitive
+// types, dimension limit checks, and NegativeArraySizeException / NullPointerException.
+JRT_BLOCK_ENTRY(void, JeandleRuntimeRoutine::new_array_from_mirror(oopDesc* mirror, int length, JavaThread* current))
+  JRT_BLOCK
+#ifndef PRODUCT
+    SharedRuntime::_new_array_ctr++;
+#endif
+    assert(check_jeandle_compiled_frame(current), "incorrect caller");
+    Handle h_mirror(current, mirror);
+    oop result = Reflection::reflect_new_array(h_mirror(), length, THREAD);
+    if (!HAS_PENDING_EXCEPTION) {
+      current->set_vm_result(result);
+    }
+  JRT_BLOCK_END;
   SharedRuntime::on_slowpath_allocation_exit(current);
 JRT_END
 

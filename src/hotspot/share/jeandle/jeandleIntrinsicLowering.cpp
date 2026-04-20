@@ -154,6 +154,11 @@ bool JeandleIntrinsicLowering::lower(const JeandleIntrinsicDescriptor& desc,
       return false;
     case JeandleIntrinsicCategory::ArrayScan:
       return lower_count_positives(desc, decision);
+    case JeandleIntrinsicCategory::AllocationSemantic:
+      if (desc.id == vmIntrinsics::_newArray) {
+        return lower_new_array(desc, decision);
+      }
+      return false;
     default:
       return false;
   }
@@ -711,3 +716,30 @@ bool JeandleIntrinsicLowering::lower_blackhole(const JeandleIntrinsicDescriptor&
   return true;
 }
 
+// Array.newInstance(Class<?> componentType, int length) → Object
+//
+// Stack (top-of-stack first): length (int), componentType (oop).
+// Static method — no receiver.
+//
+// Delegates to jeandle.new_array(mirror, length) JavaOp which:
+//   1. Loads the cached array klass from the mirror with acquire ordering.
+//   2. Fast path (klass non-null): calls new_array_callee(klass, length, thread).
+//   3. Slow path (klass null):     calls new_array_from_mirror_callee(mirror, length, thread)
+//      which invokes Reflection::reflect_new_array — handles klass resolution, primitive
+//      types, dimension limits, NegativeArraySizeException, NullPointerException.
+//
+// uses emit_java_op_invoke when needs_exception_edge is set (exceptions may propagate).
+bool JeandleIntrinsicLowering::lower_new_array(const JeandleIntrinsicDescriptor& desc,
+                                               const JeandleIntrinsicDecision& decision) {
+  llvm::Value* length = _interp->_jvm->ipop();
+  llvm::Value* mirror = _interp->_jvm->apop();
+
+  llvm::CallBase* result;
+  if (decision.ir_plan.needs_exception_edge) {
+    result = emit_java_op_invoke(desc, decision, {mirror, length});
+  } else {
+    result = emit_java_op_call(desc, decision, {mirror, length});
+  }
+  _interp->_jvm->apush(result);
+  return true;
+}

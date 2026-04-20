@@ -23,7 +23,7 @@
 #include "jeandle/__hotspotHeadersBegin__.hpp"
 #include "asm/macroAssembler.hpp"
 #include "asm/macroAssembler.inline.hpp"
-#include "c2_MacroAssembler_x86.hpp"
+#include "opto/c2_MacroAssembler.hpp"
 #include "code/codeBlob.hpp"
 #include "compiler/oopMap.hpp"
 #include "memory/resourceArea.hpp"
