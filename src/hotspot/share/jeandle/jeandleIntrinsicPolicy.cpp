@@ -90,6 +90,14 @@ class JeandleIntrinsicPolicyHelper : public AllStatic {
   // Keyed on the CALLER method and invoke-site BCI, not the callee MDO, so one
   // hot caller cannot disable the intrinsic for all other call sites.
   // For non-speculate reasons (Reason_intrinsic, Reason_range_check) m = nullptr.
+  //
+  // Known gap vs C2: C2 also maintains a per-compilation trap count accumulator
+  // (Compile::_trap_count[]) that sums traps across the root method and all inlined
+  // callees in the same compilation unit. The fallback here only reads the caller
+  // method's own MDO, which is equivalent for single-method compilations but weaker
+  // when non-intrinsic inlining is introduced.
+  // TODO: add a per-compilation accumulator to JeandleAbstractInterpreter (or
+  // JeandleCompilation) once non-intrinsic inlining is supported.
   static bool too_many_traps_at(const ciMethod* caller, int bci,
                                  Deoptimization::DeoptReason reason) {
     if (caller == nullptr) return false;
