@@ -19,6 +19,7 @@
 #include "jeandle/__hotspotHeadersBegin__.hpp"
 #include "classfile/vmIntrinsics.hpp"
 #include "memory/allocation.hpp"
+#include "runtime/deoptimization.hpp"
 
 class ciMethod;
 
@@ -75,6 +76,10 @@ enum class JeandleFallbackPolicy {
   ExactResult     // guarded intrinsic; guard failure produces a known constant result
 };
 
+using JeandleTrapReasonMask = uint32_t;
+static_assert(Deoptimization::Reason_LIMIT <= 32,
+              "JeandleTrapReasonMask must be widened");
+
 struct JeandleIntrinsicDescriptor {
   vmIntrinsics::ID id;
   JeandleIntrinsicSemantics semantics;
@@ -83,6 +88,7 @@ struct JeandleIntrinsicDescriptor {
   bool supports_hotspot_stub;
   bool supports_llvm_intrinsic;
   const char* java_op_name;
+  JeandleTrapReasonMask trap_throttle_mask = 0;
 };
 
 class JeandleIntrinsicRegistry : public AllStatic {
