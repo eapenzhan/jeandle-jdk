@@ -1722,6 +1722,52 @@ void JeandleAbstractInterpreter::invoke() {
     _compiled_code.set_has_method_handle_invoke(true);
   }
 
+  // Additional receiver subtype checks for interface calls via invokespecial or invokeinterface.
+  // Must run before try_lower_intrinsic so that intrinsics (e.g. _getClass) cannot bypass
+  // the runtime IllegalAccessError / IncompatibleClassChangeError that the JVMS requires
+  // when the receiver is not a subtype of the declaring interface.
+  {
+    ciKlass* receiver_constraint = nullptr;
+    if (bc == Bytecodes::_invokespecial && !target->is_object_initializer()) {
+      ciInstanceKlass* sender_klass = _method->holder();
+      if (sender_klass->is_interface()) {
+        receiver_constraint = sender_klass;
+      }
+    } else if (bc == Bytecodes::_invokeinterface && target->is_private()) {
+      assert(holder->is_interface(), "How did we get a non-interface method here!");
+      receiver_constraint = holder;
+    }
+
+    if (receiver_constraint != nullptr) {
+      assert(receiver, "receiver must be present");
+
+      int receiver_depth = target->arg_size() - 1; // Index of stack slots where receiver locates.
+      receiver_value = _jvm->raw_peek(receiver_depth).value();
+
+      Klass* receiver_constraint_klass = (Klass*)(receiver_constraint->constant_encoding());
+      llvm::PointerType* klass_type = llvm::PointerType::get(*_context, llvm::jeandle::AddrSpace::CHeapAddrSpace);
+      llvm::Value* receiver_constraint_value = _ir_builder.CreateIntToPtr(_ir_builder.getInt64((intptr_t)receiver_constraint_klass),
+                                                                          klass_type);
+
+      llvm::CallInst* checkcast = call_java_op("jeandle.checkcast", {receiver_constraint_value, receiver_value});
+
+      int cur_bci = _bytecodes.cur_bci();
+      llvm::BasicBlock* checkcast_pass = llvm::BasicBlock::Create(*_context,
+                                                                  "bci_" + std::to_string(cur_bci) + "_check_receiver_pass",
+                                                                  _llvm_func);
+      llvm::BasicBlock* checkcast_fail = llvm::BasicBlock::Create(*_context,
+                                                                  "bci_" + std::to_string(cur_bci) + "_check_receiver_fail",
+                                                                  _llvm_func);
+
+      _ir_builder.CreateCondBr(checkcast, checkcast_pass, checkcast_fail);
+
+      uncommon_trap(Deoptimization::Reason_class_check, Deoptimization::Action_none, checkcast_fail);
+
+      _ir_builder.SetInsertPoint(checkcast_pass);
+      _block->set_tail_llvm_block(checkcast_pass);
+    }
+  }
+
   // try inline callee as intrinsic
   if (target->is_loaded()
     && target->check_intrinsic_candidate()
@@ -1749,47 +1795,6 @@ void JeandleAbstractInterpreter::invoke() {
     method_signature = target->signature();
   } else {
     assert(method_signature == target->signature(), "method signature unmatched");
-  }
-
-  // Additional receiver subtype checks for interface calls via invokespecial or invokeinterface.
-  ciKlass* receiver_constraint = nullptr;
-  if (bc == Bytecodes::_invokespecial && !target->is_object_initializer()) {
-    ciInstanceKlass* sender_klass = _method->holder();
-    if (sender_klass->is_interface()) {
-      receiver_constraint = sender_klass;
-    }
-  } else if (bc == Bytecodes::_invokeinterface && target->is_private()) {
-    assert(holder->is_interface(), "How did we get a non-interface method here!");
-    receiver_constraint = holder;
-  }
-
-  if (receiver_constraint != nullptr) {
-    assert(receiver, "receiver must be present");
-
-    int receiver_depth = target->arg_size() - 1; // Index of stack slots where receiver locates.
-    receiver_value = _jvm->raw_peek(receiver_depth).value();
-
-    Klass* receiver_constraint_klass = (Klass*)(receiver_constraint->constant_encoding());
-    llvm::PointerType* klass_type = llvm::PointerType::get(*_context, llvm::jeandle::AddrSpace::CHeapAddrSpace);
-    llvm::Value* receiver_constraint_value = _ir_builder.CreateIntToPtr(_ir_builder.getInt64((intptr_t)receiver_constraint_klass),
-                                                                        klass_type);
-
-    llvm::CallInst* checkcast = call_java_op("jeandle.checkcast", {receiver_constraint_value, receiver_value});
-
-    int cur_bci = _bytecodes.cur_bci();
-    llvm::BasicBlock* checkcast_pass = llvm::BasicBlock::Create(*_context,
-                                                                "bci_" + std::to_string(cur_bci) + "_check_receiver_pass",
-                                                                _llvm_func);
-    llvm::BasicBlock* checkcast_fail = llvm::BasicBlock::Create(*_context,
-                                                                "bci_" + std::to_string(cur_bci) + "_check_receiver_fail",
-                                                                _llvm_func);
-
-    _ir_builder.CreateCondBr(checkcast, checkcast_pass, checkcast_fail);
-
-    uncommon_trap(Deoptimization::Reason_class_check, Deoptimization::Action_none, checkcast_fail);
-
-    _ir_builder.SetInsertPoint(checkcast_pass);
-    _block->set_tail_llvm_block(checkcast_pass);
   }
 
   // Construct arguments.
