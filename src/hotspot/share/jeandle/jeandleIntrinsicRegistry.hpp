@@ -38,12 +38,39 @@ enum class JeandleIntrinsicCategory {
   ArrayScan            // byte-array scan intrinsics (countPositives, etc.)
 };
 
-struct JeandleControlSemantics {
+// Control-flow facts about an intrinsic.  Combined into descriptor.control_flags
+// with bitwise OR.  Intentionally an unscoped enum so descriptors can write
+// `CTRL_MAY_DEOPT | CTRL_NEEDS_EXCEPTION_EDGE` without operator overloads, and
+// so unset entries can simply write CTRL_NONE.
+enum JeandleControlFlag : uint8_t {
+  CTRL_NONE                 = 0,
   // The intrinsic lowering can transfer control to uncommon_trap/deopt.
-  bool may_deopt;
+  CTRL_MAY_DEOPT            = 1u << 0,
   // The intrinsic may throw a Java exception from the lowered path and needs
   // invoke-style exception continuation handling, not just deopt replay.
-  bool needs_exception_edge;
+  CTRL_NEEDS_EXCEPTION_EDGE = 1u << 1,
+};
+
+// Memory-effect facts about an intrinsic.  Combined into descriptor.memory_flags
+// with bitwise OR.  barrier_kind is a separate descriptor field because it is a
+// multi-valued enum, not a yes/no flag.
+enum JeandleMemoryFlag : uint8_t {
+  MEM_NONE              = 0,
+  // The intrinsic reads/writes heap or otherwise constrains memory ordering.
+  MEM_HAS_EFFECT        = 1u << 0,
+  // The lowered IR/call must remain visible to GC-aware statepoint/barrier code.
+  MEM_NEEDS_GC_STATE    = 1u << 1,
+};
+
+// What lowering paths a descriptor *declares* it can take.  Combined into
+// descriptor.support_flags with bitwise OR.  Per-VM availability of those paths
+// (stub installed, CPU feature present) is a runtime check in JeandleIntrinsicSupport.
+enum JeandleSupportFlag : uint8_t {
+  SUPPORT_NONE          = 0,
+  // A HotSpot-generated stub or SharedRuntime fallback is an available impl.
+  SUPPORT_HOTSPOT_STUB  = 1u << 0,
+  // LLVM has a builtin or direct IR representation for this intrinsic.
+  SUPPORT_LLVM_INTRIN   = 1u << 1,
 };
 
 enum class JeandleMemoryBarrierKind {
@@ -53,20 +80,6 @@ enum class JeandleMemoryBarrierKind {
   CardMarkPost,      // post-write card table mark
   VolatileLoad,      // acquire semantics
   VolatileStore,     // release semantics
-};
-
-struct JeandleMemorySemantics {
-  // The intrinsic reads/writes heap or otherwise constrains memory ordering.
-  bool has_memory_effect;
-  // The lowered IR/call must remain visible to GC-aware statepoint/barrier code.
-  bool needs_gc_state;
-  JeandleMemoryBarrierKind barrier_kind = JeandleMemoryBarrierKind::None;
-};
-
-struct JeandleIntrinsicSemantics {
-  JeandleIntrinsicCategory category;
-  JeandleControlSemantics control;
-  JeandleMemorySemantics memory;
 };
 
 enum class JeandleLoweringKind {
@@ -83,19 +96,31 @@ static_assert(Deoptimization::Reason_LIMIT <= 32,
 struct JeandleIntrinsicDescriptor {
   // VM intrinsic ID being described.  This is also the O(1) lookup-table key.
   vmIntrinsics::ID id;
-  // Semantic facts consumed by policy, lowering, and IR annotation.
-  JeandleIntrinsicSemantics semantics;
+  // High-level semantic family selected as the first lowering dispatch key.
+  JeandleIntrinsicCategory category;
+  // Bitmask of JeandleControlFlag.
+  uint8_t control_flags;
+  // Bitmask of JeandleMemoryFlag.
+  uint8_t memory_flags;
+  // GC barrier shape required by the intrinsic, if any.
+  JeandleMemoryBarrierKind barrier_kind;
   // Coarse lowering family selected before capability/fallback refinement.
   JeandleLoweringKind lowering_kind;
-  // True when a HotSpot-generated stub is an available/preferred implementation.
-  bool supports_hotspot_stub;
-  // True when LLVM has a builtin or direct IR representation for this intrinsic.
-  bool supports_llvm_intrinsic;
+  // Bitmask of JeandleSupportFlag declaring which lowering paths exist.
+  uint8_t support_flags;
   // JavaOp symbol used only by JavaOperation descriptors; nullptr otherwise.
   const char* java_op_name;
   // Deoptimization reasons that throttle admission when too many traps occurred
   // at the invoke site.  Zero means no trap-based throttling.
-  JeandleTrapReasonMask trap_throttle_mask = 0;
+  JeandleTrapReasonMask trap_throttle_mask;
+
+  // Inline accessors so consumers can read named flags without bit-twiddling.
+  bool may_deopt()             const { return (control_flags & CTRL_MAY_DEOPT) != 0; }
+  bool needs_exception_edge()  const { return (control_flags & CTRL_NEEDS_EXCEPTION_EDGE) != 0; }
+  bool has_memory_effect()     const { return (memory_flags  & MEM_HAS_EFFECT) != 0; }
+  bool needs_gc_state()        const { return (memory_flags  & MEM_NEEDS_GC_STATE) != 0; }
+  bool supports_hotspot_stub() const { return (support_flags & SUPPORT_HOTSPOT_STUB) != 0; }
+  bool supports_llvm_intrin()  const { return (support_flags & SUPPORT_LLVM_INTRIN) != 0; }
 };
 
 class JeandleIntrinsicRegistry : public AllStatic {

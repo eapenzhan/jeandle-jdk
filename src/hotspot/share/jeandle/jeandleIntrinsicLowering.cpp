@@ -123,7 +123,7 @@ bool JeandleIntrinsicLowering::lower(const JeandleIntrinsicDescriptor& desc,
   _target = target;
   // Two-level dispatch: the descriptor category selects the shared lowering
   // shape, then category-specific code switches on the precise intrinsic ID.
-  switch (desc.semantics.category) {
+  switch (desc.category) {
     case JeandleIntrinsicCategory::PureMath:
       return lower_pure_math(desc, decision);
     case JeandleIntrinsicCategory::TypeCoercion:
