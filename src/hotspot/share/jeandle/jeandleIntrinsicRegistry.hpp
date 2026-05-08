@@ -44,11 +44,6 @@ struct JeandleControlSemantics {
   // The intrinsic may throw a Java exception from the lowered path and needs
   // invoke-style exception continuation handling, not just deopt replay.
   bool needs_exception_edge;
-  // Set true when the intrinsic lowering assumes the receiver is already non-null
-  // (i.e., the null check is the caller's responsibility, not this intrinsic's).
-  // This is true for all invokevirtual/invokeinterface JavaOps where the abstract
-  // interpreter has already performed the null check before dispatch.
-  bool requires_nonnull_receiver = false;
 };
 
 enum class JeandleMemoryBarrierKind {
@@ -81,15 +76,6 @@ enum class JeandleLoweringKind {
   JavaOperation    // delegate complex semantics to a JavaOp runtime glue method
 };
 
-enum class JeandleFallbackPolicy {
-  None,           // fallback is unreachable; the preferred lowering always succeeds
-  NormalInvoke,   // intrinsic not selected; caller keeps the original Java invoke
-  RuntimeCall,    // guarded intrinsic; slow path calls a runtime helper
-  JavaOperation,  // guarded intrinsic; slow path is a JavaOp-based runtime operation
-  DeoptTrap,      // guarded intrinsic; failure path deoptimizes (no runtime call)
-  ExactResult     // guarded intrinsic; guard failure produces a known constant result
-};
-
 using JeandleTrapReasonMask = uint32_t;
 static_assert(Deoptimization::Reason_LIMIT <= 32,
               "JeandleTrapReasonMask must be widened");
@@ -101,8 +87,6 @@ struct JeandleIntrinsicDescriptor {
   JeandleIntrinsicSemantics semantics;
   // Coarse lowering family selected before capability/fallback refinement.
   JeandleLoweringKind lowering_kind;
-  // What the caller should do when this intrinsic is not selected/supported.
-  JeandleFallbackPolicy fallback_policy;
   // True when a HotSpot-generated stub is an available/preferred implementation.
   bool supports_hotspot_stub;
   // True when LLVM has a builtin or direct IR representation for this intrinsic.
