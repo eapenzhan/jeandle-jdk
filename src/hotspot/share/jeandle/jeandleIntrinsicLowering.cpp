@@ -28,7 +28,7 @@
 #include "jeandle/jeandleIntrinsicIRSemantics.hpp"
 #include "jeandle/jeandleIntrinsicPolicy.hpp"
 #include "jeandle/jeandleIntrinsicRegistry.hpp"
-#include "jeandle/jeandleRuntimeEntrypoints.hpp"
+#include "jeandle/jeandleIntrinsicEntrypoints.hpp"
 #include "jeandle/jeandleType.hpp"
 
 #include "jeandle/__hotspotHeadersBegin__.hpp"
@@ -70,13 +70,13 @@ class JeandleIntrinsicLoweringHelper : public AllStatic {
 void JeandleIntrinsicLowering::annotate_generated_instruction(llvm::Instruction& inst,
                                                               const JeandleIntrinsicDescriptor& desc,
                                                               const JeandleIntrinsicDecision& decision,
-                                                              const JeandleRuntimeEntrypoint* entry) const {
+                                                              const JeandleIntrinsicEntrypoint* entry) const {
   JeandleIntrinsicIRSemantics::annotate_instruction(inst, desc, decision.ir_plan, entry);
 }
 
 llvm::CallInst* JeandleIntrinsicLowering::emit_runtime_call(const JeandleIntrinsicDescriptor& desc,
                                                             const JeandleIntrinsicDecision& decision,
-                                                            const JeandleRuntimeEntrypoint& entry,
+                                                            const JeandleIntrinsicEntrypoint& entry,
                                                             llvm::ArrayRef<llvm::Value*> args) {
   llvm::SmallVector<llvm::OperandBundleDef, 1> bundles =
     JeandleIntrinsicIRSemantics::build_operand_bundles(_interp, decision.ir_plan);
@@ -87,7 +87,7 @@ llvm::CallInst* JeandleIntrinsicLowering::emit_runtime_call(const JeandleIntrins
 
 llvm::InvokeInst* JeandleIntrinsicLowering::emit_runtime_invoke(const JeandleIntrinsicDescriptor& desc,
                                                                 const JeandleIntrinsicDecision& decision,
-                                                                const JeandleRuntimeEntrypoint& entry,
+                                                                const JeandleIntrinsicEntrypoint& entry,
                                                                 llvm::ArrayRef<llvm::Value*> args) {
   llvm::SmallVector<llvm::OperandBundleDef, 1> bundles =
     JeandleIntrinsicIRSemantics::build_operand_bundles(_interp, decision.ir_plan);
@@ -124,6 +124,8 @@ bool JeandleIntrinsicLowering::lower(const JeandleIntrinsicDescriptor& desc,
                                      const JeandleIntrinsicDecision& decision,
                                      const ciMethod* target) {
   _target = target;
+  // Two-level dispatch: the descriptor category selects the shared lowering
+  // shape, then category-specific code switches on the precise intrinsic ID.
   switch (desc.semantics.category) {
     case JeandleIntrinsicCategory::PureMath:
       return lower_pure_math(desc, decision);
@@ -301,8 +303,8 @@ bool JeandleIntrinsicLowering::lower_libm_math(const JeandleIntrinsicDescriptor&
     return true;
   }
 
-  JeandleRuntimeEntrypoint entry;
-  if (!JeandleRuntimeEntrypoints::resolve_math(desc.id, decision.impl_kind, _interp->_module, entry)) {
+  JeandleIntrinsicEntrypoint entry;
+  if (!JeandleIntrinsicEntrypoints::resolve_math(desc.id, decision.impl_kind, _interp->_module, entry)) {
     return false;
   }
   llvm::Value* arg = _interp->_jvm->dpop();
@@ -342,8 +344,8 @@ bool JeandleIntrinsicLowering::lower_pow_hybrid(const JeandleIntrinsicDescriptor
                                                          _interp->_module.getDataLayout())) {
     JeandleIntrinsicDecision sqrt_decision = JeandleIntrinsicPolicy::refine(
       decision, desc, JeandleIntrinsicImplKind::LLVMBuiltinCall, "pow(x,0.5) -> llvm.sqrt");
-    JeandleRuntimeEntrypoint runtime_entry;
-    if (!JeandleRuntimeEntrypoints::resolve_math(vmIntrinsics::_dpow, decision.impl_kind,
+    JeandleIntrinsicEntrypoint runtime_entry;
+    if (!JeandleIntrinsicEntrypoints::resolve_math(vmIntrinsics::_dpow, decision.impl_kind,
                                                  _interp->_module, runtime_entry)) {
       return false;
     }
@@ -392,8 +394,8 @@ bool JeandleIntrinsicLowering::lower_pow_hybrid(const JeandleIntrinsicDescriptor
     return true;
   }
 
-  JeandleRuntimeEntrypoint entry;
-  if (!JeandleRuntimeEntrypoints::resolve_math(vmIntrinsics::_dpow, decision.impl_kind, _interp->_module, entry)) {
+  JeandleIntrinsicEntrypoint entry;
+  if (!JeandleIntrinsicEntrypoints::resolve_math(vmIntrinsics::_dpow, decision.impl_kind, _interp->_module, entry)) {
     return false;
   }
   if (decision.ir_plan.needs_exception_edge) {
@@ -651,8 +653,8 @@ bool JeandleIntrinsicLowering::lower_count_positives(
   llvm::Value* ba_start   = builder.CreateInBoundsGEP(
       llvm::Type::getInt8Ty(ctx), array_base, off, "ba_start");
 
-  JeandleRuntimeEntrypoint entry;
-  if (!JeandleRuntimeEntrypoints::resolve_count_positives(_interp->_module, entry)) {
+  JeandleIntrinsicEntrypoint entry;
+  if (!JeandleIntrinsicEntrypoints::resolve_count_positives(_interp->_module, entry)) {
     return false;
   }
   llvm::CallInst* result = emit_runtime_call(desc, decision, entry, {ba_start, len});

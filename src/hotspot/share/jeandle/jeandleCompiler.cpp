@@ -29,6 +29,7 @@
 
 #include "jeandle/jeandleCompilation.hpp"
 #include "jeandle/jeandleCompiler.hpp"
+#include "jeandle/jeandleIntrinsicRegistry.hpp"
 #include "jeandle/jeandleRuntimeRoutine.hpp"
 #include "jeandle/jeandleType.hpp"
 #include "jeandle/jeandleUtils.hpp"
@@ -105,6 +106,8 @@ void JeandleCompiler::initialize() {
   // Per JeandleCompiler initialization:
   if (should_perform_init()) {
     _data_layout = _target_machine->createDataLayout();
+
+    JeandleIntrinsicRegistry::initialize();
 
     install_jeandle_llvm_fatal_error_handler();
 
