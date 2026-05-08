@@ -25,13 +25,14 @@
 // Per-intrinsic capability snapshot, computed once at decision time.
 //
 // This is the Jeandle analog of C2Compiler::is_intrinsic_supported: a pure
-// capability query that answers what lowering paths are available for a
-// given descriptor, independent of policy priority rules.
+// capability query that answers what lowering paths are actually available for
+// a given descriptor at runtime (stub installed?  CPU feature present?  flag
+// enabled?), separate from the policy that ranks those paths.
 //
-// The split is intentional:
-//   JeandleIntrinsicSupport::query()  - what can we do? (stub checks, flag reads)
-//   JeandleIntrinsicPolicy::decide()  - what should we do? (priority rules over caps)
-//   JeandleIntrinsicLowering::lower() - how do we emit IR? (IR construction)
+// The split is intentional and addresses three different kinds of facts:
+//   descriptor           - what we declared statically about the intrinsic
+//   capabilities (here)  - what is available right now in this VM
+//   decision (Policy)    - which path we actually picked, given priorities
 struct JeandleIntrinsicCapabilities {
   // Descriptor says supports_llvm_intrinsic; lowering can emit an llvm.* builtin call.
   bool has_llvm_builtin;
@@ -49,14 +50,10 @@ struct JeandleIntrinsicCapabilities {
 class JeandleIntrinsicSupport : public AllStatic {
  public:
   // Return the set of available lowering paths for the given descriptor.
-  // All stub and flag checks are confined to this method; callers receive a
-  // plain capability struct and apply their own priority rules.
+  // All stub-installation, CPU-feature, and flag checks live in this single
+  // method; callers receive a plain capability struct and apply their own
+  // priority rules.
   static JeandleIntrinsicCapabilities query(const JeandleIntrinsicDescriptor& desc);
-
-  // Convenience: returns true when at least one lowering path is available.
-  static bool is_supported(const JeandleIntrinsicDescriptor& desc) {
-    return query(desc).any_path();
-  }
 };
 
 #endif // SHARE_JEANDLE_INTRINSIC_SUPPORT_HPP

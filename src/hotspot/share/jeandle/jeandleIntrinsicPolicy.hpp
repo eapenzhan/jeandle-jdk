@@ -35,20 +35,13 @@ enum class JeandleIntrinsicImplKind {
   // Non-PureIRNode kinds: cross call boundaries or delegate to the runtime
   HotSpotStub,
   SharedRuntime,
-  GuardedHybrid,
   JavaOperation
 };
 
-enum class JeandleLoweringMode {
-  PureLLVM,
-  LeafRuntimeCall,
-  ManagedRuntimeCall,
-  ManagedRuntimeInvoke,
-  JavaOpCall
-};
-
+// IR-level annotations consumed when emitting the chosen lowering.  These three flags
+// are derived from impl_kind + descriptor.semantics; there is no separate "mode" enum
+// because the impl_kind already captures the lowering shape.
 struct JeandleIRSemanticPlan {
-  JeandleLoweringMode mode;
   bool attach_deopt_bundle;
   bool attach_gc_leaf_attr;
   bool needs_exception_edge;
@@ -58,7 +51,6 @@ struct JeandleIntrinsicDecision {
   bool supported;
   JeandleIntrinsicImplKind impl_kind;
   JeandleIRSemanticPlan ir_plan;
-  const char* reason;
 };
 
 class JeandleIntrinsicPolicy : public StackObj {
@@ -67,14 +59,12 @@ class JeandleIntrinsicPolicy : public StackObj {
                                   const ciMethod* caller,
                                   int caller_bci) const;
 
-  // Refine a GuardedHybrid decision to the specific impl_kind chosen at
-  // lowering time.  The caller passes the actual sub-path that was selected
-  // (e.g. IRInstruction, LLVMBuiltinCall, HotSpotStub, SharedRuntime) so that
-  // impl_kind and ir_plan accurately reflect the instruction being emitted.
+  // Rebuild a decision when lowering picks a different impl_kind than policy did
+  // (e.g. pow(x, 2) -> fmul replaces a planned LLVMBuiltinCall with IRInstruction).
+  // Returns a fresh decision so the IR metadata reflects the instruction actually emitted.
   static JeandleIntrinsicDecision refine(const JeandleIntrinsicDecision& base,
                                          const JeandleIntrinsicDescriptor& desc,
-                                         JeandleIntrinsicImplKind refined_kind,
-                                         const char* reason);
+                                         JeandleIntrinsicImplKind refined_kind);
 };
 
 #endif // SHARE_JEANDLE_INTRINSIC_POLICY_HPP

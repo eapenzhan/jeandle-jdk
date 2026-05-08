@@ -55,10 +55,9 @@ class JeandleIntrinsicRegistryTable : public AllStatic {
  private:
   // Descriptor fields, in order:
   //   id
-  //   semantics = { category, control = { may_deopt, needs_exception_edge,
-  //                                       requires_nonnull_receiver },
+  //   semantics = { category, control = { may_deopt, needs_exception_edge },
   //                 memory  = { has_memory_effect, needs_gc_state, barrier_kind } }
-  //   lowering_kind, fallback_policy
+  //   lowering_kind
   //   supports_hotspot_stub, supports_llvm_intrinsic
   //   java_op_name
   //   trap_throttle_mask
@@ -66,32 +65,31 @@ class JeandleIntrinsicRegistryTable : public AllStatic {
   // Control flags are intentionally separate:
   //   may_deopt             => lowering can emit uncommon_trap/deopt replay
   //   needs_exception_edge  => lowering may throw and needs invoke-style edges
-  //   requires_nonnull_receiver => caller has already null-checked the receiver
   static constexpr JeandleIntrinsicDescriptor _intrinsic_table[] = {
     { vmIntrinsics::_dabs,
       {JeandleIntrinsicCategory::PureMath, {false, false}, {false, false}},
-      JeandleLoweringKind::PureIRNode, JeandleFallbackPolicy::None, false, true, nullptr },
+      JeandleLoweringKind::PureIRNode, false, true, nullptr },
     { vmIntrinsics::_fabs,
       {JeandleIntrinsicCategory::PureMath, {false, false}, {false, false}},
-      JeandleLoweringKind::PureIRNode, JeandleFallbackPolicy::None, false, true, nullptr },
+      JeandleLoweringKind::PureIRNode, false, true, nullptr },
     { vmIntrinsics::_iabs,
       {JeandleIntrinsicCategory::PureMath, {false, false}, {false, false}},
-      JeandleLoweringKind::PureIRNode, JeandleFallbackPolicy::None, false, true, nullptr },
+      JeandleLoweringKind::PureIRNode, false, true, nullptr },
     { vmIntrinsics::_labs,
       {JeandleIntrinsicCategory::PureMath, {false, false}, {false, false}},
-      JeandleLoweringKind::PureIRNode, JeandleFallbackPolicy::None, false, true, nullptr },
+      JeandleLoweringKind::PureIRNode, false, true, nullptr },
     { vmIntrinsics::_bitCount_i,
       {JeandleIntrinsicCategory::PureMath, {false, false}, {false, false}},
-      JeandleLoweringKind::PureIRNode, JeandleFallbackPolicy::None, false, true, nullptr },
+      JeandleLoweringKind::PureIRNode, false, true, nullptr },
     { vmIntrinsics::_bitCount_l,
       {JeandleIntrinsicCategory::PureMath, {false, false}, {false, false}},
-      JeandleLoweringKind::PureIRNode, JeandleFallbackPolicy::None, false, true, nullptr },
+      JeandleLoweringKind::PureIRNode, false, true, nullptr },
     { vmIntrinsics::_dsqrt,
       {JeandleIntrinsicCategory::PureMath, {false, false}, {false, false}},
-      JeandleLoweringKind::PureIRNode, JeandleFallbackPolicy::None, false, true, nullptr },
+      JeandleLoweringKind::PureIRNode, false, true, nullptr },
     { vmIntrinsics::_dsqrt_strict,
       {JeandleIntrinsicCategory::PureMath, {false, false}, {false, false}},
-      JeandleLoweringKind::PureIRNode, JeandleFallbackPolicy::None, false, true, nullptr },
+      JeandleLoweringKind::PureIRNode, false, true, nullptr },
 
     // Rounding: GuardedHybrid because a native instruction is required for
     // correctness/performance (SSE4.1 ROUNDSD on x86, FRINT* on AArch64).
@@ -100,60 +98,60 @@ class JeandleIntrinsicRegistryTable : public AllStatic {
     // (NormalInvoke fallback).  This mirrors C2's match_rule_supported() guard.
     { vmIntrinsics::_floor,
       {JeandleIntrinsicCategory::PureMath, {false, false}, {false, false}},
-      JeandleLoweringKind::GuardedHybrid, JeandleFallbackPolicy::NormalInvoke, false, true, nullptr },
+      JeandleLoweringKind::GuardedHybrid, false, true, nullptr },
     { vmIntrinsics::_ceil,
       {JeandleIntrinsicCategory::PureMath, {false, false}, {false, false}},
-      JeandleLoweringKind::GuardedHybrid, JeandleFallbackPolicy::NormalInvoke, false, true, nullptr },
+      JeandleLoweringKind::GuardedHybrid, false, true, nullptr },
     { vmIntrinsics::_rint,
       {JeandleIntrinsicCategory::PureMath, {false, false}, {false, false}},
-      JeandleLoweringKind::GuardedHybrid, JeandleFallbackPolicy::NormalInvoke, false, true, nullptr },
+      JeandleLoweringKind::GuardedHybrid, false, true, nullptr },
 
     { vmIntrinsics::_floatToRawIntBits,
       {JeandleIntrinsicCategory::TypeCoercion, {false, false}, {false, false}},
-      JeandleLoweringKind::PureIRNode, JeandleFallbackPolicy::None, false, true, nullptr },
+      JeandleLoweringKind::PureIRNode, false, true, nullptr },
     { vmIntrinsics::_intBitsToFloat,
       {JeandleIntrinsicCategory::TypeCoercion, {false, false}, {false, false}},
-      JeandleLoweringKind::PureIRNode, JeandleFallbackPolicy::None, false, true, nullptr },
+      JeandleLoweringKind::PureIRNode, false, true, nullptr },
     { vmIntrinsics::_doubleToRawLongBits,
       {JeandleIntrinsicCategory::TypeCoercion, {false, false}, {false, false}},
-      JeandleLoweringKind::PureIRNode, JeandleFallbackPolicy::None, false, true, nullptr },
+      JeandleLoweringKind::PureIRNode, false, true, nullptr },
     { vmIntrinsics::_longBitsToDouble,
       {JeandleIntrinsicCategory::TypeCoercion, {false, false}, {false, false}},
-      JeandleLoweringKind::PureIRNode, JeandleFallbackPolicy::None, false, true, nullptr },
+      JeandleLoweringKind::PureIRNode, false, true, nullptr },
 
     { vmIntrinsics::_dsin,
       {JeandleIntrinsicCategory::LibmMath, {false, false}, {false, false}},
-      JeandleLoweringKind::RuntimeLeafCall, JeandleFallbackPolicy::NormalInvoke, true, true, nullptr },
+      JeandleLoweringKind::RuntimeLeafCall, true, true, nullptr },
     { vmIntrinsics::_dcos,
       {JeandleIntrinsicCategory::LibmMath, {false, false}, {false, false}},
-      JeandleLoweringKind::RuntimeLeafCall, JeandleFallbackPolicy::NormalInvoke, true, true, nullptr },
+      JeandleLoweringKind::RuntimeLeafCall, true, true, nullptr },
     { vmIntrinsics::_dtan,
       {JeandleIntrinsicCategory::LibmMath, {false, false}, {false, false}},
-      JeandleLoweringKind::RuntimeLeafCall, JeandleFallbackPolicy::NormalInvoke, true, true, nullptr },
+      JeandleLoweringKind::RuntimeLeafCall, true, true, nullptr },
     { vmIntrinsics::_dlog,
       {JeandleIntrinsicCategory::LibmMath, {false, false}, {false, false}},
-      JeandleLoweringKind::RuntimeLeafCall, JeandleFallbackPolicy::NormalInvoke, true, true, nullptr },
+      JeandleLoweringKind::RuntimeLeafCall, true, true, nullptr },
     { vmIntrinsics::_dlog10,
       {JeandleIntrinsicCategory::LibmMath, {false, false}, {false, false}},
-      JeandleLoweringKind::RuntimeLeafCall, JeandleFallbackPolicy::NormalInvoke, true, true, nullptr },
+      JeandleLoweringKind::RuntimeLeafCall, true, true, nullptr },
     { vmIntrinsics::_dexp,
       {JeandleIntrinsicCategory::LibmMath, {false, false}, {false, false}},
-      JeandleLoweringKind::RuntimeLeafCall, JeandleFallbackPolicy::NormalInvoke, true, true, nullptr },
+      JeandleLoweringKind::RuntimeLeafCall, true, true, nullptr },
     { vmIntrinsics::_dpow,
       {JeandleIntrinsicCategory::LibmMath, {false, false}, {false, false}},
-      JeandleLoweringKind::GuardedHybrid, JeandleFallbackPolicy::RuntimeCall, true, true, nullptr },
+      JeandleLoweringKind::GuardedHybrid, true, true, nullptr },
 
     // System hints
     { vmIntrinsics::_onSpinWait,
       {JeandleIntrinsicCategory::MacroSemantic, {false, false}, {false, false}},
-      JeandleLoweringKind::PureIRNode, JeandleFallbackPolicy::None, false, false, nullptr },
+      JeandleLoweringKind::PureIRNode, false, false, nullptr },
 
     // _blackhole: optimizer constraint — consume all arguments to prevent DCE, return void.
     // Uses volatile inline asm per argument so LLVM cannot eliminate the argument computations.
     // MacroSemantic + PureIRNode: always supported, no deopt, no memory effects.
     { vmIntrinsics::_blackhole,
       {JeandleIntrinsicCategory::MacroSemantic, {false, false}, {false, false}},
-      JeandleLoweringKind::PureIRNode, JeandleFallbackPolicy::None, false, false, nullptr },
+      JeandleLoweringKind::PureIRNode, false, false, nullptr },
 
     // Preconditions.checkIndex(int index, int length, BiFunction exceptionFactory) -> int
     //
@@ -173,7 +171,7 @@ class JeandleIntrinsicRegistryTable : public AllStatic {
     // mirror the same site throttle via trap_throttle_mask.
     { vmIntrinsics::_Preconditions_checkIndex,
       {JeandleIntrinsicCategory::MacroSemantic, {true, false}, {false, false}},
-      JeandleLoweringKind::PureIRNode, JeandleFallbackPolicy::DeoptTrap, false, false, nullptr,
+      JeandleLoweringKind::PureIRNode, false, false, nullptr,
       trap_reason_mask(Deoptimization::Reason_intrinsic) |
           trap_reason_mask(Deoptimization::Reason_range_check) },
 
@@ -182,7 +180,7 @@ class JeandleIntrinsicRegistryTable : public AllStatic {
     // Identical trap semantics to the int variant; only the value width differs.
     { vmIntrinsics::_Preconditions_checkLongIndex,
       {JeandleIntrinsicCategory::MacroSemantic, {true, false}, {false, false}},
-      JeandleLoweringKind::PureIRNode, JeandleFallbackPolicy::DeoptTrap, false, false, nullptr,
+      JeandleLoweringKind::PureIRNode, false, false, nullptr,
       trap_reason_mask(Deoptimization::Reason_intrinsic) |
           trap_reason_mask(Deoptimization::Reason_range_check) },
 
@@ -197,50 +195,51 @@ class JeandleIntrinsicRegistryTable : public AllStatic {
     //
     // Control semantics:
     //   may_deopt              = false — NPE is an exception, not a deopt
-    //   requires_nonnull_receiver = true — the null check is the caller's responsibility;
-    //                               invokevirtual/invokeinterface bytecodes null-check the receiver
-    //                               before dispatch.  If getClass is ever lowered via a non-invoke
-    //                               path (e.g., inlined JavaOp, direct IR construction), a null
-    //                               check must be added at that callsite or inside the JavaOp itself.
+    //
+    // Receiver null-check responsibility: invokevirtual/invokeinterface bytecodes already
+    // null-check the receiver before dispatch, so this lowering path assumes a non-null
+    // object on the stack.  If getClass is ever lowered via a non-invoke path (e.g., inlined
+    // JavaOp, direct IR construction), a null check must be added at that callsite or
+    // inside the JavaOp itself.
     //
     // Note: attach_deopt_bundle is still set to true unconditionally for JavaOpCall mode
     // (see make_plan); this is a conservative plan-level decision independent of may_deopt.
     { vmIntrinsics::_getClass,
-      {JeandleIntrinsicCategory::TypeSemantic, {false, false, true}, {true, true}},
-      JeandleLoweringKind::JavaOperation, JeandleFallbackPolicy::NormalInvoke, false, false, "jeandle.get_class" },
+      {JeandleIntrinsicCategory::TypeSemantic, {false, false}, {true, true}},
+      JeandleLoweringKind::JavaOperation, false, false, "jeandle.get_class" },
 
     // Reference.get(): returns the referent, applying a GC load barrier (WeakReferentLoad).
     // may_deopt = false — no speculative guard; attach_deopt_bundle is plan-driven by
     // needs_gc_state, not by deoptimization semantics.
     { vmIntrinsics::_Reference_get,
-      {JeandleIntrinsicCategory::MemorySemantic, {false, false, true}, {true, true, JeandleMemoryBarrierKind::WeakReferentLoad}},
-      JeandleLoweringKind::JavaOperation, JeandleFallbackPolicy::NormalInvoke, false, false, "jeandle.reference_get" },
+      {JeandleIntrinsicCategory::MemorySemantic, {false, false}, {true, true, JeandleMemoryBarrierKind::WeakReferentLoad}},
+      JeandleLoweringKind::JavaOperation, false, false, "jeandle.reference_get" },
 
     // Reference.refersTo0(): raw referent pointer identity comparison (no GC barrier).
     // may_deopt = false — no speculative guard.
     { vmIntrinsics::_Reference_refersTo0,
-      {JeandleIntrinsicCategory::MemorySemantic, {false, false, true}, {true, true, JeandleMemoryBarrierKind::RawReferentRead}},
-      JeandleLoweringKind::JavaOperation, JeandleFallbackPolicy::NormalInvoke, false, false, "jeandle.reference_refers_to" },
+      {JeandleIntrinsicCategory::MemorySemantic, {false, false}, {true, true, JeandleMemoryBarrierKind::RawReferentRead}},
+      JeandleLoweringKind::JavaOperation, false, false, "jeandle.reference_refers_to" },
 
     // Memory fences: lower to LLVM fence instructions (acquire / release / seq_cst).
     // These have memory effects but no GC interaction; barrier_kind is None because
     // the fence IR instruction is the complete implementation — no GC pass augmentation needed.
     { vmIntrinsics::_loadFence,
       {JeandleIntrinsicCategory::BarrierSemantic, {false, false}, {true, false}},
-      JeandleLoweringKind::PureIRNode, JeandleFallbackPolicy::None, false, false, nullptr },
+      JeandleLoweringKind::PureIRNode, false, false, nullptr },
     { vmIntrinsics::_storeFence,
       {JeandleIntrinsicCategory::BarrierSemantic, {false, false}, {true, false}},
-      JeandleLoweringKind::PureIRNode, JeandleFallbackPolicy::None, false, false, nullptr },
+      JeandleLoweringKind::PureIRNode, false, false, nullptr },
     { vmIntrinsics::_fullFence,
       {JeandleIntrinsicCategory::BarrierSemantic, {false, false}, {true, false}},
-      JeandleLoweringKind::PureIRNode, JeandleFallbackPolicy::None, false, false, nullptr },
+      JeandleLoweringKind::PureIRNode, false, false, nullptr },
 
     // PhantomReference.refersTo0 shares identical semantics with Reference.refersTo0:
     // raw referent read (no GC barrier), pointer identity comparison, boolean result.
     // may_deopt = false — no speculative guard.
     { vmIntrinsics::_PhantomReference_refersTo0,
-      {JeandleIntrinsicCategory::MemorySemantic, {false, false, true}, {true, true, JeandleMemoryBarrierKind::RawReferentRead}},
-      JeandleLoweringKind::JavaOperation, JeandleFallbackPolicy::NormalInvoke, false, false, "jeandle.reference_refers_to" },
+      {JeandleIntrinsicCategory::MemorySemantic, {false, false}, {true, true, JeandleMemoryBarrierKind::RawReferentRead}},
+      JeandleLoweringKind::JavaOperation, false, false, "jeandle.reference_refers_to" },
 
     // Array.newInstance(Class<?> componentType, int length) → Object
     //
@@ -259,7 +258,7 @@ class JeandleIntrinsicRegistryTable : public AllStatic {
     //                               call handles allocation-time GC interaction
     { vmIntrinsics::_newArray,
       {JeandleIntrinsicCategory::AllocationSemantic, {false, true}, {true, false}},
-      JeandleLoweringKind::JavaOperation, JeandleFallbackPolicy::NormalInvoke, false, false, "jeandle.new_array" },
+      JeandleLoweringKind::JavaOperation, false, false, "jeandle.new_array" },
 
     // StringCoding.countPositives(byte[] ba, int off, int len) → int
     //
@@ -282,7 +281,7 @@ class JeandleIntrinsicRegistryTable : public AllStatic {
     //                      bundle so the interpreter can re-execute and throw IOOBE.
     { vmIntrinsics::_countPositives,
       {JeandleIntrinsicCategory::ArrayScan, {true, false}, {true, false}},
-      JeandleLoweringKind::RuntimeLeafCall, JeandleFallbackPolicy::NormalInvoke, true, false, nullptr,
+      JeandleLoweringKind::RuntimeLeafCall, true, false, nullptr,
       trap_reason_mask(Deoptimization::Reason_intrinsic) },
   };
 };

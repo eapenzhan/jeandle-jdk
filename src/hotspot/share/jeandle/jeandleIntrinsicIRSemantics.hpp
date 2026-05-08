@@ -33,15 +33,16 @@ class JeandleAbstractInterpreter;
 struct JeandleIntrinsicEntrypoint;
 
 // Projects an already-chosen intrinsic policy into LLVM IR details: operand
-// bundles, metadata, and call attributes.  Keep this separate from policy so
-// lowering decisions do not depend on LLVM instruction/interpreter mechanics.
+// bundles, metadata, and call attributes.  Logically a continuation of Policy,
+// kept in a separate file only to isolate the LLVM/AbstractInterpreter
+// dependencies from Policy's pure ciMethod-only headers.
 class JeandleIntrinsicIRSemantics : public AllStatic {
  public:
   static llvm::SmallVector<llvm::OperandBundleDef, 1> build_operand_bundles(JeandleAbstractInterpreter* interp,
                                                                              const JeandleIRSemanticPlan& plan);
   static void annotate_instruction(llvm::Instruction& inst,
                                    const JeandleIntrinsicDescriptor& desc,
-                                   const JeandleIRSemanticPlan& plan,
+                                   const JeandleIntrinsicDecision& decision,
                                    const JeandleIntrinsicEntrypoint* entry = nullptr);
 };
 
