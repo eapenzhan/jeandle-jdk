@@ -2437,15 +2437,25 @@ void JeandleAbstractInterpreter::do_new() {
 
   jint layout_helper = klass->layout_helper();
   assert(Klass::layout_helper_is_instance(layout_helper), "Unexpected klass");
-  llvm::Value* size_in_bytes = _ir_builder.getInt32(Klass::layout_helper_size_in_bytes(layout_helper));
 
   Klass* klass_enc = (Klass*)(klass->constant_encoding());
   llvm::PointerType* klass_type = llvm::PointerType::get(*_context, llvm::jeandle::AddrSpace::CHeapAddrSpace);
   llvm::Value* klass_addr = _ir_builder.getInt64((int64_t)klass_enc);
   llvm::Value* klass_ptr = _ir_builder.CreateIntToPtr(klass_addr, klass_type);
 
-  llvm::InvokeInst* new_inst = llvm::cast<llvm::InvokeInst>(
-      call_java_op_ex("jeandle.new_instance", {klass_ptr, size_in_bytes}, {create_current_deopt_bundle()}));
+  llvm::InvokeInst* new_inst;
+  if (Klass::layout_helper_needs_slow_path(layout_helper)) {
+    // Must go slow path: class has finalizer, is abstract, too large, etc.
+    llvm::Value* current_thread = call_java_op("jeandle.current_thread", {});
+    new_inst = create_call_ex(JeandleRuntimeRoutine::new_instance_callee(_module),
+                              {klass_ptr, current_thread},
+                              llvm::CallingConv::Hotspot_JIT,
+                              {create_current_deopt_bundle()});
+  } else {
+    llvm::Value* size_in_bytes = _ir_builder.getInt32(Klass::layout_helper_size_in_bytes(layout_helper));
+    new_inst = llvm::cast<llvm::InvokeInst>(
+        call_java_op_ex("jeandle.new_instance", {klass_ptr, size_in_bytes}, {create_current_deopt_bundle()}));
+  }
 
   // new always produces an exact type.
   new_inst->addRetAttr(llvm::Attribute::get(*_context,
