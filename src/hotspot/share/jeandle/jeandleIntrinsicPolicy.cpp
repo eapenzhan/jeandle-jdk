@@ -33,21 +33,18 @@ static bool is_managed_runtime_call(JeandleIntrinsicImplKind impl_kind,
       impl_kind != JeandleIntrinsicImplKind::SharedRuntime) {
     return false;
   }
-  return desc.semantics.memory.needs_gc_state || desc.semantics.control.may_deopt;
+  return desc.needs_gc_state() || desc.may_deopt();
 }
 
 static JeandleIRSemanticPlan make_plan(const JeandleIntrinsicDescriptor& desc,
                                        JeandleIntrinsicImplKind impl_kind) {
-  const JeandleControlSemantics& control = desc.semantics.control;
-  const JeandleMemorySemantics& memory = desc.semantics.memory;
-
   const bool is_javaop      = (impl_kind == JeandleIntrinsicImplKind::JavaOperation);
   const bool is_pure_llvm   = (impl_kind == JeandleIntrinsicImplKind::IRInstruction ||
                                impl_kind == JeandleIntrinsicImplKind::LLVMBuiltinCall);
   const bool is_managed     = is_managed_runtime_call(impl_kind, desc);
   const bool is_leaf_call   = (impl_kind == JeandleIntrinsicImplKind::HotSpotStub ||
                                impl_kind == JeandleIntrinsicImplKind::SharedRuntime) && !is_managed;
-  const bool needs_inv_edge = control.needs_exception_edge && !is_javaop;
+  const bool needs_inv_edge = desc.needs_exception_edge() && !is_javaop;
 
   JeandleIRSemanticPlan plan{};
 
@@ -57,18 +54,18 @@ static JeandleIRSemanticPlan make_plan(const JeandleIntrinsicDescriptor& desc,
   //   - the call crosses a managed-runtime boundary (call or invoke);
   //   - the call is a JavaOp (conservatively non-leaf until JavaOp infrastructure can
   //     derive precise bundle requirements).
-  plan.attach_deopt_bundle = control.may_deopt || memory.needs_gc_state ||
+  plan.attach_deopt_bundle = desc.may_deopt() || desc.needs_gc_state() ||
                              is_managed || needs_inv_edge || is_javaop;
 
   // gc-leaf-function attribute is only correct on truly side-effect-free leaf paths:
   // pure LLVM IR or a leaf runtime call with no GC/exception/deopt interaction.
-  plan.attach_gc_leaf_attr = !memory.needs_gc_state &&
-                             !memory.has_memory_effect &&
-                             !control.may_deopt &&
-                             !control.needs_exception_edge &&
+  plan.attach_gc_leaf_attr = !desc.needs_gc_state() &&
+                             !desc.has_memory_effect() &&
+                             !desc.may_deopt() &&
+                             !desc.needs_exception_edge() &&
                              (is_pure_llvm || is_leaf_call);
 
-  plan.needs_exception_edge = control.needs_exception_edge;
+  plan.needs_exception_edge = desc.needs_exception_edge();
   return plan;
 }
 
@@ -138,8 +135,8 @@ JeandleIntrinsicDecision JeandleIntrinsicPolicy::decide(const JeandleIntrinsicDe
       // PureIRNode intrinsics are unconditionally supported; the impl_kind is
       // determined by category alone (no capability query needed).
       const JeandleIntrinsicImplKind k =
-          (desc.semantics.category == JeandleIntrinsicCategory::TypeCoercion ||
-           desc.semantics.category == JeandleIntrinsicCategory::BarrierSemantic)
+          (desc.category == JeandleIntrinsicCategory::TypeCoercion ||
+           desc.category == JeandleIntrinsicCategory::BarrierSemantic)
               ? JeandleIntrinsicImplKind::IRInstruction
               : JeandleIntrinsicImplKind::LLVMBuiltinCall;
       return make_decision(desc, k);

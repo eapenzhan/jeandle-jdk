@@ -31,7 +31,7 @@
 JeandleIntrinsicCapabilities JeandleIntrinsicSupport::query(const JeandleIntrinsicDescriptor& desc) {
   JeandleIntrinsicCapabilities caps{};
 
-  caps.has_llvm_builtin   = desc.supports_llvm_intrinsic;
+  caps.has_llvm_builtin   = desc.supports_llvm_intrin();
   caps.hotspot_preferred  = JeandleUseHotspotIntrinsics;
 
   // CPU-feature guards: some LLVM builtins require specific ISA extensions to
@@ -56,7 +56,7 @@ JeandleIntrinsicCapabilities JeandleIntrinsicSupport::query(const JeandleIntrins
       break;
   }
 
-  if (!desc.supports_hotspot_stub) {
+  if (!desc.supports_hotspot_stub()) {
     return caps;
   }
 

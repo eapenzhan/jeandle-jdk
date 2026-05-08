@@ -32,7 +32,7 @@
 // impl_kind plus the descriptor's exception-edge / GC-state / deopt facts.
 static const char* lowering_mode_name(const JeandleIntrinsicDecision& decision,
                                       const JeandleIntrinsicDescriptor& desc) {
-  const bool needs_inv_edge = desc.semantics.control.needs_exception_edge;
+  const bool needs_inv_edge = desc.needs_exception_edge();
   switch (decision.impl_kind) {
     case JeandleIntrinsicImplKind::IRInstruction:
     case JeandleIntrinsicImplKind::LLVMBuiltinCall:
@@ -43,7 +43,7 @@ static const char* lowering_mode_name(const JeandleIntrinsicDecision& decision,
     case JeandleIntrinsicImplKind::HotSpotStub:
     case JeandleIntrinsicImplKind::SharedRuntime:
       if (needs_inv_edge) return "managed-runtime-invoke";
-      return (desc.semantics.memory.needs_gc_state || desc.semantics.control.may_deopt)
+      return (desc.needs_gc_state() || desc.may_deopt())
                  ? "managed-runtime-call"
                  : "leaf-runtime-call";
     case JeandleIntrinsicImplKind::JavaOperation:
@@ -96,7 +96,7 @@ void JeandleIntrinsicIRSemantics::annotate_instruction(llvm::Instruction& inst,
   set_str_metadata(inst, "jeandle.lowering.mode",
                    lowering_mode_name(decision, desc));
   set_str_metadata(inst, "jeandle.semantic.barrier_kind",
-                   barrier_kind_name(desc.semantics.memory.barrier_kind));
+                   barrier_kind_name(desc.barrier_kind));
 
   if (auto* call = llvm::dyn_cast<llvm::CallBase>(&inst)) {
     llvm::LLVMContext& ctx = inst.getContext();
