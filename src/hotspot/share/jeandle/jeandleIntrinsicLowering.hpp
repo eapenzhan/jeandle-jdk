@@ -25,7 +25,7 @@
 #include "llvm/IR/Instructions.h"
 
 #include "jeandle/jeandleIntrinsicPolicy.hpp"
-#include "jeandle/jeandleRuntimeEntrypoints.hpp"
+#include "jeandle/jeandleIntrinsicEntrypoints.hpp"
 #include "memory/allocation.hpp"
 
 class JeandleAbstractInterpreter;
@@ -67,11 +67,11 @@ class JeandleIntrinsicLowering : public StackObj {
                             const JeandleIntrinsicDecision& decision);
   llvm::CallInst* emit_runtime_call(const JeandleIntrinsicDescriptor& desc,
                                     const JeandleIntrinsicDecision& decision,
-                                    const JeandleRuntimeEntrypoint& entry,
+                                    const JeandleIntrinsicEntrypoint& entry,
                                     llvm::ArrayRef<llvm::Value*> args);
   llvm::InvokeInst* emit_runtime_invoke(const JeandleIntrinsicDescriptor& desc,
                                         const JeandleIntrinsicDecision& decision,
-                                        const JeandleRuntimeEntrypoint& entry,
+                                        const JeandleIntrinsicEntrypoint& entry,
                                         llvm::ArrayRef<llvm::Value*> args);
   llvm::CallInst* emit_java_op_call(const JeandleIntrinsicDescriptor& desc,
                                     const JeandleIntrinsicDecision& decision,
@@ -82,7 +82,7 @@ class JeandleIntrinsicLowering : public StackObj {
   void annotate_generated_instruction(llvm::Instruction& inst,
                                       const JeandleIntrinsicDescriptor& desc,
                                       const JeandleIntrinsicDecision& decision,
-                                      const JeandleRuntimeEntrypoint* entry = nullptr) const;
+                                      const JeandleIntrinsicEntrypoint* entry = nullptr) const;
 
  public:
   explicit JeandleIntrinsicLowering(JeandleAbstractInterpreter* interp)

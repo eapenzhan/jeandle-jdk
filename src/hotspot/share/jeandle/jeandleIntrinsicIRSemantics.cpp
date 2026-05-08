@@ -22,7 +22,7 @@
 #include <string>
 
 #include "jeandle/jeandleAbstractInterpreter.hpp"
-#include "jeandle/jeandleRuntimeEntrypoints.hpp"
+#include "jeandle/jeandleIntrinsicEntrypoints.hpp"
 
 #include "jeandle/__hotspotHeadersBegin__.hpp"
 #include "memory/allocation.hpp"
@@ -75,7 +75,7 @@ JeandleIntrinsicIRSemantics::build_operand_bundles(JeandleAbstractInterpreter* i
 void JeandleIntrinsicIRSemantics::annotate_instruction(llvm::Instruction& inst,
                                                        const JeandleIntrinsicDescriptor& desc,
                                                        const JeandleIRSemanticPlan& plan,
-                                                       const JeandleRuntimeEntrypoint* entry) {
+                                                       const JeandleIntrinsicEntrypoint* entry) {
   // Jeandle semantic annotations go on the instruction as named metadata so
   // they are isolated from function-attribute groups (which affect code-gen).
   set_str_metadata(inst, "jeandle.intrinsic.id",

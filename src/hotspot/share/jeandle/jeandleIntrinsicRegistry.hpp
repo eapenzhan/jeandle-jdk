@@ -23,20 +23,26 @@
 
 class ciMethod;
 
+// High-level semantic family used as the first lowering dispatch key.  Entries
+// in the same category share a lowering shape; individual IDs are still handled
+// by the category-specific lowering code.
 enum class JeandleIntrinsicCategory {
-  PureMath,
-  LibmMath,
-  TypeCoercion,   // bit-level reinterpretation between primitive types (bitcast)
-  MemorySemantic,
-  TypeSemantic,
-  AllocationSemantic,
-  BarrierSemantic,
-  MacroSemantic,
-  ArrayScan       // byte-array scan intrinsics (countPositives, etc.)
+  PureMath,            // arithmetic lowered to LLVM IR/builtins
+  LibmMath,            // math calls that may use libm/HotSpot stubs
+  TypeCoercion,        // bit-level reinterpretation between primitive types (bitcast)
+  MemorySemantic,      // heap/reference operations with GC-visible semantics
+  TypeSemantic,        // type/reflection operations
+  AllocationSemantic,  // allocation operations that may throw
+  BarrierSemantic,     // memory ordering and GC barrier semantics
+  MacroSemantic,       // VM/compiler pseudo-intrinsics such as blackhole
+  ArrayScan            // byte-array scan intrinsics (countPositives, etc.)
 };
 
 struct JeandleControlSemantics {
+  // The intrinsic lowering can transfer control to uncommon_trap/deopt.
   bool may_deopt;
+  // The intrinsic may throw a Java exception from the lowered path and needs
+  // invoke-style exception continuation handling, not just deopt replay.
   bool needs_exception_edge;
   // Set true when the intrinsic lowering assumes the receiver is already non-null
   // (i.e., the null check is the caller's responsibility, not this intrinsic's).
@@ -55,7 +61,9 @@ enum class JeandleMemoryBarrierKind {
 };
 
 struct JeandleMemorySemantics {
+  // The intrinsic reads/writes heap or otherwise constrains memory ordering.
   bool has_memory_effect;
+  // The lowered IR/call must remain visible to GC-aware statepoint/barrier code.
   bool needs_gc_state;
   JeandleMemoryBarrierKind barrier_kind = JeandleMemoryBarrierKind::None;
 };
@@ -67,10 +75,10 @@ struct JeandleIntrinsicSemantics {
 };
 
 enum class JeandleLoweringKind {
-  PureIRNode,
-  RuntimeLeafCall,
-  GuardedHybrid,
-  JavaOperation
+  PureIRNode,      // lower directly to LLVM IR nodes without a call boundary
+  RuntimeLeafCall, // emit a runtime/stub call that does not safepoint or throw
+  GuardedHybrid,   // choose between IR/builtin and runtime paths by capability
+  JavaOperation    // delegate complex semantics to a JavaOp runtime glue method
 };
 
 enum class JeandleFallbackPolicy {
@@ -87,18 +95,34 @@ static_assert(Deoptimization::Reason_LIMIT <= 32,
               "JeandleTrapReasonMask must be widened");
 
 struct JeandleIntrinsicDescriptor {
+  // VM intrinsic ID being described.  This is also the O(1) lookup-table key.
   vmIntrinsics::ID id;
+  // Semantic facts consumed by policy, lowering, and IR annotation.
   JeandleIntrinsicSemantics semantics;
+  // Coarse lowering family selected before capability/fallback refinement.
   JeandleLoweringKind lowering_kind;
+  // What the caller should do when this intrinsic is not selected/supported.
   JeandleFallbackPolicy fallback_policy;
+  // True when a HotSpot-generated stub is an available/preferred implementation.
   bool supports_hotspot_stub;
+  // True when LLVM has a builtin or direct IR representation for this intrinsic.
   bool supports_llvm_intrinsic;
+  // JavaOp symbol used only by JavaOperation descriptors; nullptr otherwise.
   const char* java_op_name;
+  // Deoptimization reasons that throttle admission when too many traps occurred
+  // at the invoke site.  Zero means no trap-based throttling.
   JeandleTrapReasonMask trap_throttle_mask = 0;
 };
 
 class JeandleIntrinsicRegistry : public AllStatic {
+ private:
+  static const JeandleIntrinsicDescriptor* _lookup[(int)vmIntrinsics::ID_LIMIT];
+#ifdef ASSERT
+  static bool _initialized;
+#endif
+
  public:
+  static void initialize();
   static const JeandleIntrinsicDescriptor* lookup(vmIntrinsics::ID id);
   static const JeandleIntrinsicDescriptor* lookup(const ciMethod* method);
 };

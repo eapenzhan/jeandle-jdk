@@ -26,6 +26,22 @@ static constexpr JeandleTrapReasonMask trap_reason_mask(Deoptimization::DeoptRea
   return JeandleTrapReasonMask(1u) << static_cast<uint>(reason);
 }
 
+#ifdef ASSERT
+static void validate_descriptor(const JeandleIntrinsicDescriptor& desc) {
+  assert(desc.id != vmIntrinsics::_none && vmIntrinsics::is_valid_id(desc.id),
+         "invalid Jeandle intrinsic id");
+  assert(desc.lowering_kind != JeandleLoweringKind::PureIRNode ||
+         !desc.semantics.control.needs_exception_edge,
+         "PureIRNode cannot require an exception edge");
+  assert(desc.trap_throttle_mask == 0 || desc.semantics.control.may_deopt,
+         "trap throttling requires a deopt-capable intrinsic");
+  assert(desc.lowering_kind != JeandleLoweringKind::JavaOperation || desc.java_op_name != nullptr,
+         "JavaOperation descriptor must have a non-null java_op_name");
+  assert(desc.java_op_name == nullptr || desc.java_op_name[0] != '\0',
+         "empty JavaOp name string");
+}
+#endif
+
 class JeandleIntrinsicRegistryTable : public AllStatic {
  public:
   static constexpr const JeandleIntrinsicDescriptor* table_begin() {
@@ -37,6 +53,20 @@ class JeandleIntrinsicRegistryTable : public AllStatic {
   }
 
  private:
+  // Descriptor fields, in order:
+  //   id
+  //   semantics = { category, control = { may_deopt, needs_exception_edge,
+  //                                       requires_nonnull_receiver },
+  //                 memory  = { has_memory_effect, needs_gc_state, barrier_kind } }
+  //   lowering_kind, fallback_policy
+  //   supports_hotspot_stub, supports_llvm_intrinsic
+  //   java_op_name
+  //   trap_throttle_mask
+  //
+  // Control flags are intentionally separate:
+  //   may_deopt             => lowering can emit uncommon_trap/deopt replay
+  //   needs_exception_edge  => lowering may throw and needs invoke-style edges
+  //   requires_nonnull_receiver => caller has already null-checked the receiver
   static constexpr JeandleIntrinsicDescriptor _intrinsic_table[] = {
     { vmIntrinsics::_dabs,
       {JeandleIntrinsicCategory::PureMath, {false, false}, {false, false}},
@@ -251,7 +281,7 @@ class JeandleIntrinsicRegistryTable : public AllStatic {
     //                      emit uncommon_trap(Reason_intrinsic) which requires a deopt
     //                      bundle so the interpreter can re-execute and throw IOOBE.
     { vmIntrinsics::_countPositives,
-      {JeandleIntrinsicCategory::ArrayScan, {false, true}, {true, false}},
+      {JeandleIntrinsicCategory::ArrayScan, {true, false}, {true, false}},
       JeandleLoweringKind::RuntimeLeafCall, JeandleFallbackPolicy::NormalInvoke, true, false, nullptr,
       trap_reason_mask(Deoptimization::Reason_intrinsic) },
   };
@@ -259,15 +289,37 @@ class JeandleIntrinsicRegistryTable : public AllStatic {
 
 constexpr JeandleIntrinsicDescriptor JeandleIntrinsicRegistryTable::_intrinsic_table[];
 
-const JeandleIntrinsicDescriptor* JeandleIntrinsicRegistry::lookup(vmIntrinsics::ID id) {
+const JeandleIntrinsicDescriptor*
+JeandleIntrinsicRegistry::_lookup[(int)vmIntrinsics::ID_LIMIT];
+
+#ifdef ASSERT
+bool JeandleIntrinsicRegistry::_initialized = false;
+#endif
+
+void JeandleIntrinsicRegistry::initialize() {
+  // _lookup has static storage duration and is already zero-initialized (all nullptr)
+  // by the C++ runtime before this function runs.  No explicit clear needed.
+
   for (const JeandleIntrinsicDescriptor* it = JeandleIntrinsicRegistryTable::table_begin();
        it != JeandleIntrinsicRegistryTable::table_end();
        ++it) {
-    if (it->id == id) {
-      return it;
-    }
+    DEBUG_ONLY(validate_descriptor(*it);)
+    const int index = vmIntrinsics::as_int(it->id);
+    assert(_lookup[index] == nullptr, "duplicate Jeandle intrinsic descriptor");
+    _lookup[index] = it;
   }
-  return nullptr;
+
+#ifdef ASSERT
+  _initialized = true;
+#endif
+}
+
+const JeandleIntrinsicDescriptor* JeandleIntrinsicRegistry::lookup(vmIntrinsics::ID id) {
+  assert(_initialized, "JeandleIntrinsicRegistry must be initialized first");
+  if (!vmIntrinsics::is_valid_id(id)) {
+    return nullptr;
+  }
+  return _lookup[vmIntrinsics::as_int(id)];
 }
 
 const JeandleIntrinsicDescriptor* JeandleIntrinsicRegistry::lookup(const ciMethod* method) {

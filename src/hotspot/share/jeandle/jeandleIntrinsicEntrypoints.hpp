@@ -17,8 +17,8 @@
  * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
-#ifndef SHARE_JEANDLE_RUNTIME_ENTRYPOINTS_HPP
-#define SHARE_JEANDLE_RUNTIME_ENTRYPOINTS_HPP
+#ifndef SHARE_JEANDLE_INTRINSIC_ENTRYPOINTS_HPP
+#define SHARE_JEANDLE_INTRINSIC_ENTRYPOINTS_HPP
 
 #include "jeandle/__llvmHeadersBegin__.hpp"
 #include "llvm/IR/CallingConv.h"
@@ -30,22 +30,22 @@
 #include "classfile/vmIntrinsics.hpp"
 #include "memory/allocation.hpp"
 
-struct JeandleRuntimeEntrypoint {
+struct JeandleIntrinsicEntrypoint {
   llvm::FunctionCallee callee;
   llvm::CallingConv::ID calling_conv;
   bool is_gc_leaf;
   const char* well_known_name;
 };
 
-class JeandleRuntimeEntrypoints : public AllStatic {
+class JeandleIntrinsicEntrypoints : public AllStatic {
  public:
   static bool resolve_math(vmIntrinsics::ID id,
                            JeandleIntrinsicImplKind impl_kind,
                            llvm::Module& module,
-                           JeandleRuntimeEntrypoint& out);
+                           JeandleIntrinsicEntrypoint& out);
 
   static bool resolve_count_positives(llvm::Module& module,
-                                      JeandleRuntimeEntrypoint& out);
+                                      JeandleIntrinsicEntrypoint& out);
 };
 
-#endif // SHARE_JEANDLE_RUNTIME_ENTRYPOINTS_HPP
+#endif // SHARE_JEANDLE_INTRINSIC_ENTRYPOINTS_HPP

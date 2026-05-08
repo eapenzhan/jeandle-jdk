@@ -17,7 +17,7 @@
  * Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
-#include "jeandle/jeandleRuntimeEntrypoints.hpp"
+#include "jeandle/jeandleIntrinsicEntrypoints.hpp"
 
 #include "jeandle/jeandleRuntimeRoutine.hpp"
 
@@ -25,10 +25,10 @@ static llvm::CallingConv::ID runtime_cc() {
   return llvm::CallingConv::C;
 }
 
-bool JeandleRuntimeEntrypoints::resolve_math(vmIntrinsics::ID id,
-                                             JeandleIntrinsicImplKind impl_kind,
-                                             llvm::Module& module,
-                                             JeandleRuntimeEntrypoint& out) {
+bool JeandleIntrinsicEntrypoints::resolve_math(vmIntrinsics::ID id,
+                                               JeandleIntrinsicImplKind impl_kind,
+                                               llvm::Module& module,
+                                               JeandleIntrinsicEntrypoint& out) {
   out.calling_conv = runtime_cc();
   out.is_gc_leaf = true;
   out.well_known_name = nullptr;
@@ -80,8 +80,8 @@ bool JeandleRuntimeEntrypoints::resolve_math(vmIntrinsics::ID id,
   }
 }
 
-bool JeandleRuntimeEntrypoints::resolve_count_positives(llvm::Module& module,
-                                                         JeandleRuntimeEntrypoint& out) {
+bool JeandleIntrinsicEntrypoints::resolve_count_positives(llvm::Module& module,
+                                                          JeandleIntrinsicEntrypoint& out) {
   out.calling_conv    = runtime_cc();
   out.is_gc_leaf      = true;
   out.well_known_name = "count_positives";
