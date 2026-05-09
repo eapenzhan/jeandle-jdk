@@ -1235,9 +1235,17 @@ void JeandleAbstractInterpreter::if_icmp(llvm::CmpInst::Predicate p) {
   llvm::Value* r = _jvm->ipop();
   llvm::Value* l = _jvm->ipop();
   llvm::Value* cond = _ir_builder.CreateICmp(p, l, r);
+  JeandleBasicBlock* true_succ = bci2block()[_bytecodes.get_dest()];
+  JeandleBasicBlock* false_succ = bci2block()[_bytecodes.next_bci()];
+  if (true_succ->is_exception_handler()) {
+    merge_into_exception_handler(true_succ);
+  }
+  if (false_succ->is_exception_handler()) {
+    merge_into_exception_handler(false_succ);
+  }
   _ir_builder.CreateCondBr(cond,
-                           bci2block()[_bytecodes.get_dest()]->header_llvm_block(),
-                           bci2block()[_bytecodes.next_bci()]->header_llvm_block());
+                           true_succ->header_llvm_block(),
+                           false_succ->header_llvm_block());
 }
 
 void JeandleAbstractInterpreter::lcmp() {
@@ -1298,11 +1306,27 @@ void JeandleAbstractInterpreter::fcmp(BasicType type, bool true_if_unordered) {
   _jvm->ipush(_ir_builder.CreateSelect(negative_case, JeandleType::int_const(_ir_builder, -1), non_negative_case));
 }
 
+void JeandleAbstractInterpreter::merge_into_exception_handler(JeandleBasicBlock* handler_block) {
+  // The bytecode verifier guarantees that all paths reaching the same BCI have
+  // consistent stack depth and types. So a normal flow branch (goto/if) targeting
+  // a handler block has the same stack layout as the exception path. We just need
+  // to merge the current VMState into the handler, bypassing the is_exception_handler()
+  // skip in the successor loop of interpret_block().
+  JeandleVMState* adjusted_state = _jvm->copy();
+  if (!handler_block->merge_VM_state_from(adjusted_state, _ir_builder.GetInsertBlock(), _method)) {
+    JEANDLE_ERROR_ASSERT_AND_RET_VOID_ON_FAIL(false, "failed to merge VM state into exception handler block from normal flow");
+  }
+}
+
 void JeandleAbstractInterpreter::goto_bci(int bci) {
   if (bci <= _bytecodes.cur_bci()) {
     add_safepoint_poll();
   }
-  _ir_builder.CreateBr(bci2block()[bci]->header_llvm_block());
+  JeandleBasicBlock* succ = bci2block()[bci];
+  if (succ->is_exception_handler()) {
+    merge_into_exception_handler(succ);
+  }
+  _ir_builder.CreateBr(succ->header_llvm_block());
 }
 
 void JeandleAbstractInterpreter::lookup_switch() {
@@ -1324,12 +1348,19 @@ void JeandleAbstractInterpreter::lookup_switch() {
   }
 
   llvm::Value* key = _jvm->ipop();
-  llvm::BasicBlock* default_block = bci2block()[cur_bci + sw.default_offset()]->header_llvm_block();
-  llvm::SwitchInst* switch_inst = _ir_builder.CreateSwitch(key, default_block, length);
+  JeandleBasicBlock* default_block = bci2block()[cur_bci + sw.default_offset()];
+  if (default_block->is_exception_handler()) {
+    merge_into_exception_handler(default_block);
+  }
+  llvm::SwitchInst* switch_inst = _ir_builder.CreateSwitch(key, default_block->header_llvm_block(), length);
 
   for (int i = 0; i < length; i++) {
     LookupswitchPair pair = sw.pair_at(i);
-    switch_inst->addCase(JeandleType::int_const(_ir_builder, pair.match()), bci2block()[cur_bci + pair.offset()]->header_llvm_block());
+    JeandleBasicBlock* case_block = bci2block()[cur_bci + pair.offset()];
+    if (case_block->is_exception_handler()) {
+      merge_into_exception_handler(case_block);
+    }
+    switch_inst->addCase(JeandleType::int_const(_ir_builder, pair.match()), case_block->header_llvm_block());
   }
 }
 
@@ -1352,12 +1383,18 @@ void JeandleAbstractInterpreter::table_switch() {
   }
 
   llvm::Value* idx = _jvm->ipop();
-  llvm::BasicBlock* default_block = bci2block()[cur_bci + sw.default_offset()]->header_llvm_block();
-  llvm::SwitchInst* switch_inst = _ir_builder.CreateSwitch(idx, default_block, length);
+  JeandleBasicBlock* default_block = bci2block()[cur_bci + sw.default_offset()];
+  if (default_block->is_exception_handler()) {
+    merge_into_exception_handler(default_block);
+  }
+  llvm::SwitchInst* switch_inst = _ir_builder.CreateSwitch(idx, default_block->header_llvm_block(), length);
 
   for (int i = 0; i < length; i++) {
-    llvm::BasicBlock* case_block = bci2block()[cur_bci + sw.dest_offset_at(i)]->header_llvm_block();
-    switch_inst->addCase(JeandleType::int_const(_ir_builder, i + low), case_block);
+    JeandleBasicBlock* case_block = bci2block()[cur_bci + sw.dest_offset_at(i)];
+    if (case_block->is_exception_handler()) {
+      merge_into_exception_handler(case_block);
+    }
+    switch_inst->addCase(JeandleType::int_const(_ir_builder, i + low), case_block->header_llvm_block());
   }
 }
 
