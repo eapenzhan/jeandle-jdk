@@ -66,6 +66,8 @@
 ; Global vm options
 @VMOptions.UseTLAB = external global i1
 @VMOptions.ZeroTLAB = external global i1
+
+; Byte offsets for java.lang.ref.Reference instance fields.
 @java_lang_ref_Reference.referent_offset = external global i32
 
 ; Byte offset of the cached array klass in java.lang.Class (injected field).
