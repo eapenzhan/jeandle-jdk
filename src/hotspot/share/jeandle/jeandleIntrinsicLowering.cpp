@@ -30,6 +30,7 @@
 #include "jeandle/jeandleIntrinsicRegistry.hpp"
 #include "jeandle/jeandleIntrinsicEntrypoints.hpp"
 #include "jeandle/jeandleType.hpp"
+#include "jeandle/jeandleUtils.hpp"
 
 #include "jeandle/__hotspotHeadersBegin__.hpp"
 #include "ci/ciMethod.hpp"
@@ -71,6 +72,21 @@ void JeandleIntrinsicLowering::annotate_generated_instruction(llvm::Instruction&
   JeandleIntrinsicIRSemantics::annotate_instruction(inst, desc, decision, entry);
 }
 
+// Mirror PR #430's call-site type-info attachment for object-returning intrinsics:
+// the regular invoke() path runs this via maybe_attach_java_klass_ret_attr at
+// jeandleAbstractInterpreter.cpp around line 1593, but intrinsic dispatch returns
+// from invoke() before that point. Centralizing here keeps every CallBase the
+// emit helpers produce on the same JavaKlass / JavaKlassExact contract as the
+// regular path, so TypeCheckElimination sees the same return-type information.
+void JeandleIntrinsicLowering::attach_callee_return_klass_attr(llvm::CallBase* call) const {
+  if (_target == nullptr) {
+    return;
+  }
+  maybe_attach_java_klass_ret_attr(call,
+                                   _target->signature()->return_type(),
+                                   *_interp->_context);
+}
+
 llvm::CallInst* JeandleIntrinsicLowering::emit_runtime_call(const JeandleIntrinsicDescriptor& desc,
                                                             const JeandleIntrinsicDecision& decision,
                                                             const JeandleIntrinsicEntrypoint& entry,
@@ -79,6 +95,7 @@ llvm::CallInst* JeandleIntrinsicLowering::emit_runtime_call(const JeandleIntrins
     JeandleIntrinsicIRSemantics::build_operand_bundles(_interp, decision.ir_plan);
   llvm::CallInst* call = _interp->create_call(entry.callee, args, entry.calling_conv, bundles);
   annotate_generated_instruction(*call, desc, decision, &entry);
+  attach_callee_return_klass_attr(call);
   return call;
 }
 
@@ -90,6 +107,7 @@ llvm::InvokeInst* JeandleIntrinsicLowering::emit_runtime_invoke(const JeandleInt
     JeandleIntrinsicIRSemantics::build_operand_bundles(_interp, decision.ir_plan);
   llvm::InvokeInst* invoke = _interp->create_call_ex(entry.callee, args, entry.calling_conv, bundles);
   annotate_generated_instruction(*invoke, desc, decision, &entry);
+  attach_callee_return_klass_attr(invoke);
   return invoke;
 }
 
@@ -102,6 +120,7 @@ llvm::CallInst* JeandleIntrinsicLowering::emit_java_op_call(const JeandleIntrins
   llvm::CallInst* call = _interp->call_java_op(desc.java_op_name, args, bundles);
   annotate_generated_instruction(*call, desc, decision);
   add_string_attr(*call, "jeandle.java_op", desc.java_op_name);
+  attach_callee_return_klass_attr(call);
   return call;
 }
 
@@ -114,6 +133,7 @@ llvm::InvokeInst* JeandleIntrinsicLowering::emit_java_op_invoke(const JeandleInt
   llvm::InvokeInst* invoke = _interp->call_java_op_ex(desc.java_op_name, args, bundles);
   annotate_generated_instruction(*invoke, desc, decision);
   add_string_attr(*invoke, "jeandle.java_op", desc.java_op_name);
+  attach_callee_return_klass_attr(invoke);
   return invoke;
 }
 
