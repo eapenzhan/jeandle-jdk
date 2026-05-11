@@ -1591,20 +1591,7 @@ void JeandleAbstractInterpreter::invoke() {
   invoke->addFnAttr(patch_bytes_attr);
 
   // Attach java-klass return type attribute to the call site.
-  ciType* ret_type = method_signature->return_type();
-  if (ret_type->is_klass()) {
-    ciKlass* ret_klass = ret_type->as_klass();
-    if (ret_klass->is_loaded() && !is_unverified_interface(ret_klass)) {
-      Klass* ret_klass_enc = (Klass*)(ret_klass->constant_encoding());
-      invoke->addRetAttr(llvm::Attribute::get(*_context,
-          llvm::jeandle::Attribute::JavaKlass,
-          std::to_string((uintptr_t)ret_klass_enc)));
-      if (is_effectively_final(ret_klass)) {
-        invoke->addRetAttr(llvm::Attribute::get(*_context,
-            llvm::jeandle::Attribute::JavaKlassExact));
-      }
-    }
-  }
+  maybe_attach_java_klass_ret_attr(invoke, method_signature->return_type(), *_context);
 
   if (return_type != BasicType::T_VOID) {
     _jvm->push(return_type, invoke);

@@ -83,6 +83,7 @@ class JeandleIntrinsicLowering : public StackObj {
                                       const JeandleIntrinsicDescriptor& desc,
                                       const JeandleIntrinsicDecision& decision,
                                       const JeandleIntrinsicEntrypoint* entry = nullptr) const;
+  void attach_callee_return_klass_attr(llvm::CallBase* call) const;
 
  public:
   explicit JeandleIntrinsicLowering(JeandleAbstractInterpreter* interp)
