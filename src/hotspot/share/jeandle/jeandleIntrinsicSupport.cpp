@@ -28,6 +28,19 @@
 #include "runtime/stubRoutines.hpp"
 #include "runtime/vm_version.hpp"
 
+// Probe a (StubRoutines, SharedRuntime) pair whose names match the intrinsic ID.
+// Use this inside a switch on vmIntrinsics::ID for any intrinsic where:
+//   - the vm intrinsic id is `_<name>`,
+//   - the platform stub is exposed as `StubRoutines::<name>()`, and
+//   - the SharedRuntime fallback is `SharedRuntime::<name>`.
+// Currently used by the libm family (dsin/dcos/...) but kept at file scope so
+// future intrinsics matching this shape can reuse it.
+#define MATCHED_STUB_PROBE(name)                                                           \
+  case vmIntrinsics::_##name:                                                              \
+    caps.has_hotspot_stub   = StubRoutines::name() != nullptr;                             \
+    caps.has_shared_runtime = CAST_FROM_FN_PTR(address, SharedRuntime::name) != nullptr;   \
+    break;
+
 // CPU-feature guards: some LLVM builtins require specific ISA extensions to
 // produce a native instruction.  When the required feature is absent we
 // return false so policy falls back to NormalInvoke.
@@ -56,24 +69,19 @@ static bool cpu_supports_llvm_builtin(vmIntrinsics::ID id) {
 // Per-intrinsic stub and SharedRuntime availability probe.
 //   has_hotspot_stub   — the platform-specific stub has been installed.
 //   has_shared_runtime — a SharedRuntime C-linkage function is available as fallback.
-// The libm family (dsin/dcos/.../dpow) all share the same probe shape; the
-// LIBM_PROBE macro keeps each case to one line.  Intrinsics whose stub/runtime
-// shape differs (e.g. countPositives) get their own explicit case below.
+// Intrinsics whose StubRoutines accessor and SharedRuntime function names match
+// the bare intrinsic name use the file-scope MATCHED_STUB_PROBE macro (libm
+// family today).  Intrinsics whose probe shape differs (e.g. countPositives)
+// get their own explicit case.
 static void probe_hotspot_stubs(vmIntrinsics::ID id, JeandleIntrinsicCapabilities& caps) {
-#define LIBM_PROBE(name)                                                                   \
-  case vmIntrinsics::_##name:                                                              \
-    caps.has_hotspot_stub   = StubRoutines::name() != nullptr;                             \
-    caps.has_shared_runtime = CAST_FROM_FN_PTR(address, SharedRuntime::name) != nullptr;   \
-    break;
-
   switch (id) {
-    LIBM_PROBE(dsin)
-    LIBM_PROBE(dcos)
-    LIBM_PROBE(dtan)
-    LIBM_PROBE(dlog)
-    LIBM_PROBE(dlog10)
-    LIBM_PROBE(dexp)
-    LIBM_PROBE(dpow)
+    MATCHED_STUB_PROBE(dsin)
+    MATCHED_STUB_PROBE(dcos)
+    MATCHED_STUB_PROBE(dtan)
+    MATCHED_STUB_PROBE(dlog)
+    MATCHED_STUB_PROBE(dlog10)
+    MATCHED_STUB_PROBE(dexp)
+    MATCHED_STUB_PROBE(dpow)
     // countPositives: has_hotspot_stub is true when the platform SIMD adapter has been
     // generated (AArch64: MacroAssembler::count_positives; x86: c2_MacroAssembler::count_positives).
     // has_shared_runtime is always true because the scalar C++ fallback (count_positives_impl)
@@ -85,7 +93,6 @@ static void probe_hotspot_stubs(vmIntrinsics::ID id, JeandleIntrinsicCapabilitie
     default:
       break;
   }
-#undef LIBM_PROBE
 }
 
 JeandleIntrinsicCapabilities JeandleIntrinsicSupport::query(const JeandleIntrinsicDescriptor& desc) {
