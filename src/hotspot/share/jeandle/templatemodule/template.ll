@@ -63,6 +63,16 @@
 @VMOptions.UseTLAB = external global i1
 @VMOptions.ZeroTLAB = external global i1
 
+; TLAB allocation prefetch flags (Style 1). Backed by AllocatePrefetchStyle etc.
+; These are marked constant by the VM at template module init time (see
+; jeandleRuntimeDefinedJavaOps.cpp), so IPSCCP folds their loads to immediates
+; and LoopFullUnrollPass can fully unroll the prefetch loop below.
+@VMOptions.AllocatePrefetchStyle           = external global i32
+@VMOptions.AllocatePrefetchLines           = external global i32
+@VMOptions.AllocateInstancePrefetchLines   = external global i32
+@VMOptions.AllocatePrefetchDistance        = external global i32
+@VMOptions.AllocatePrefetchStepSize        = external global i32
+
 ; Byte offsets for BasicLock structure fields.
 @BasicLock.displaced_header_offset_in_bytes = external global i32
 
@@ -208,10 +218,72 @@ check_subtype:
   ret i32 %is_subtype_ext
 }
 
+; TLAB allocation prefetch helper.
+;
+; Implements only AllocatePrefetchStyle == 1 -- a fixed-count per-allocation prefetch
+; that issues N write-prefetches at %tlab_top + AllocatePrefetchDistance + i*step. This is
+; the default style in HotSpot.
+; TODO: The other styles (2 = TLAB watermark refill, 3 = per-cache-line under generated assembly)
+; are intentionally out of scope for now; if AllocatePrefetchStyle is set to 2 or 3
+; we still emit the per-allocation sequence rather than degrade silently.
+;
+; Caller passes %is_array as a compile-time constant (i1 true/false), so after this helper
+; is inlined into its caller at JavaOperationLower(0), constant propagation collapses the
+; select on %is_array down to either AllocatePrefetchLines or AllocateInstancePrefetchLines.
+;
+; CRITICAL UNROLL CONTRACT:
+; The for-loop below is intentionally written as a runtime loop in source IR, but is REQUIRED
+; to be fully unrolled in the lowered output. The unroll is delivered by LoopFullUnrollPass
+; at llvm/lib/Passes/PassBuilderPipelines.cpp:528 (part of buildFunctionSimplificationPipeline,
+; which jeandle invokes via buildPerModuleDefaultPipeline before JavaOperationLower(1)). The
+; chain works because every loop input -- AllocatePrefetchStyle, AllocatePrefetchLines,
+; AllocateInstancePrefetchLines, AllocatePrefetchDistance, AllocatePrefetchStepSize -- is
+; defined as a `constant` template global (setConstant(true) in jeandleRuntimeDefinedJavaOps.cpp),
+; so IPSCCP folds them to immediates and gives the loop a known trip count. If LoopFullUnroll
+; ever leaves the jeandle-llvm pipeline, this loop will silently fall back to a runtime loop
+; and prefetch quality will collapse -- the verification step is to
+; grep N straight @llvm.prefetch calls in the post-lower-phase=1 IR dump.
+;
+; Prefetch is a hint instruction. AArch64 prfm (aarch64.ad:7621-7633) and x86 prefetcht0/
+; prefetchw are documented as safe with invalid addresses (no fault), so we do not guard
+; against %tlab_top + distance landing past %tlab_end or outside the heap. Same convention
+; as HotSpot C2 macro.cpp:1841-1862.
+define private hotspotcc void @__jeandle_tlab_prefetch(ptr addrspace(1) %tlab_top, i1 %is_array) noinline "lower-phase"="0" {
+entry:
+  %style = load i32, ptr @VMOptions.AllocatePrefetchStyle
+  %style_off = icmp eq i32 %style, 0
+  br i1 %style_off, label %prefetch_done, label %prefetch_setup
+
+prefetch_setup:
+  %instance_lines = load i32, ptr @VMOptions.AllocateInstancePrefetchLines
+  %array_lines    = load i32, ptr @VMOptions.AllocatePrefetchLines
+  %lines = select i1 %is_array, i32 %array_lines, i32 %instance_lines
+  %distance = load i32, ptr @VMOptions.AllocatePrefetchDistance
+  %step     = load i32, ptr @VMOptions.AllocatePrefetchStepSize
+  br label %prefetch_loop
+
+prefetch_loop:
+  %i = phi i32 [ 0, %prefetch_setup ], [ %i_next, %prefetch_emit ]
+  %loop_done = icmp uge i32 %i, %lines
+  br i1 %loop_done, label %prefetch_done, label %prefetch_emit
+
+prefetch_emit:
+  %i_step = mul i32 %i, %step
+  %i_off  = add i32 %i_step, %distance
+  %addr   = getelementptr i8, ptr addrspace(1) %tlab_top, i32 %i_off
+  ; rw=1 (write), locality=3 (L1 keep), cachetype=1 (data). All must be ImmArg per
+  ; LLVM intrinsic spec; the backend lowers to prfm PSTL1KEEP (AArch64) or prefetchw / prefetcht0 (x86).
+  call void @llvm.prefetch.p1(ptr addrspace(1) %addr, i32 1, i32 3, i32 1)
+  %i_next = add i32 %i, 1
+  br label %prefetch_loop
+
+prefetch_done:
+  ret void
+}
+
 declare hotspotcc ptr addrspace(1) @new_instance(ptr, ptr)
 
 ; Implementation of Java new object
-; TODO: Support prefetch instructions for next allocations.
 define private hotspotcc ptr addrspace(1) @jeandle.new_instance(ptr %klass, i32 %size_in_bytes) noinline "lower-phase"="1" {
 entry:
   %use_tlab = load i1, ptr @VMOptions.UseTLAB
@@ -238,6 +310,12 @@ alloc_slow_path:
 
 alloc_fast_path:
   store ptr addrspace(1) %tlab_new_top, ptr addrspace(2) %tlab_top_ptr, align 8
+
+  ; Prefetch cache lines for the NEXT allocation in this TLAB. Constant i1 false picks
+  ; AllocateInstancePrefetchLines after inline + constant propagation. See
+  ; __jeandle_tlab_prefetch above for the unroll contract.
+  call hotspotcc void @__jeandle_tlab_prefetch(ptr addrspace(1) %tlab_new_top, i1 false)
+
   %mark_word_offset = load i32, ptr @oopDesc.mark_offset_in_bytes
   %mark_word_addr = getelementptr i8, ptr addrspace(1) %tlab_old_top, i32 %mark_word_offset
 
@@ -249,6 +327,12 @@ alloc_fast_path:
   store atomic i64 %prototype_value, ptr addrspace(1) %mark_word_addr unordered, align 8
   ; TODO: When UseCompressedClassPointers is enabled, klass should be stored as a 32-bit narrowKlass
   ; instead of a full pointer. Currently this assumes uncompressed class pointers.
+  ; (Layout offsets -- oopDesc.klass_offset_in_bytes, arrayOopDesc.length_offset_in_bytes,
+  ; arrayOopDesc.base_offset_in_bytes -- are already CCP-aware because they flow through
+  ; oopDesc::klass_offset_in_bytes() / arrayOopDesc::base_offset_in_bytes() on the C++
+  ; side, so only the store width and the encoding (>> CompressedKlassPointers::shift())
+  ; need updating when CCP support is added. instance and array fast paths must be
+  ; upgraded together.)
   store atomic ptr %klass, ptr addrspace(1) %klass_addr unordered, align 8
 
   %zero_tlab = load i1, ptr @VMOptions.ZeroTLAB
@@ -288,10 +372,108 @@ declare hotspotcc ptr @jeandle.current_thread()
 declare hotspotcc ptr addrspace(1) @new_array(ptr, i32, ptr)
 
 ; Implementation of Java anewarray and newarray operation
-define private hotspotcc ptr addrspace(1) @jeandle.newarray(ptr %array_klass, i32 %length) noinline "lower-phase"="1"  {
+;
+; Parameters:
+;   %array_klass    : runtime Klass* of the array (uncompressed)
+;   %length         : array length in elements
+;   %size_in_bytes  : caller-computed total allocation size (header + payload, aligned)
+;   %base_offset    : caller-computed offset to the payload start (= arrayOopDesc::base_offset_in_bytes(T_xxx))
+;   %max_length     : caller-computed arrayOopDesc::max_array_length(element_type) (signed)
+;
+; The caller (JeandleAbstractInterpreter::do_unified_newarray) folds %size_in_bytes,
+; %base_offset and %max_length to compile-time i32 constants whenever the array klass is
+; known at IR build time (the common case), which is what enables the bump-pointer body
+; below to collapse to a few stores plus the unrolled prefetch sequence.
+;
+; Mirrors C1 LIRGenerator::do_NewTypeArray / C1 MacroAssembler::allocate_array on AArch64
+; (c1_MacroAssembler_aarch64.cpp:274-301): bump-pointer -> mark/klass/length header ->
+; memset payload -> fence release. Length is published BEFORE memset because memset's
+; payload size is derived from it (caller-side) -- if length were written after memset,
+; a concurrent reader hitting an already-zeroed but unlinked array could see length=0
+; and incorrectly compute a zero-sized payload.
+define private hotspotcc ptr addrspace(1) @jeandle.newarray(ptr %array_klass, i32 %length, i32 %size_in_bytes, i32 %base_offset, i32 %max_length) noinline "lower-phase"="1" {
 entry:
+  ; Length bounds check first. arrayOopDesc::max_array_length() is signed, and a negative
+  ; %length (e.g. user-supplied -1) must go through the runtime to raise
+  ; NegativeArraySizeException, which the slow path handles.
+  %too_long = icmp ugt i32 %length, %max_length
+  br i1 %too_long, label %array_slow_path, label %check_tlab
+
+check_tlab:
+  %use_tlab = load i1, ptr @VMOptions.UseTLAB
+  br i1 %use_tlab, label %test_tlab, label %array_slow_path
+
+test_tlab:
+  %tlab_top_offset = load i64, ptr @JavaThread.tlab_top_offset
+  %tlab_end_offset = load i64, ptr @JavaThread.tlab_end_offset
+
+  %tlab_top_ptr = inttoptr i64 %tlab_top_offset to ptr addrspace(2)
+  %tlab_end_ptr = inttoptr i64 %tlab_end_offset to ptr addrspace(2)
+
+  %tlab_old_top = load ptr addrspace(1), ptr addrspace(2) %tlab_top_ptr, align 8
+  %tlab_end = load ptr addrspace(1), ptr addrspace(2) %tlab_end_ptr, align 8
+
+  %tlab_new_top = getelementptr i8, ptr addrspace(1) %tlab_old_top, i32 %size_in_bytes
+  %if_tlab_full = icmp uge ptr addrspace(1) %tlab_new_top, %tlab_end
+  br i1 %if_tlab_full, label %array_slow_path, label %array_fast_path
+
+array_slow_path:
   %current_thread = call hotspotcc ptr @jeandle.current_thread()
-  %array_oop = call hotspotcc ptr addrspace(1) @new_array(ptr %array_klass, i32 %length, ptr %current_thread) [ "deopt"() ]
+  %slow_array_oop = call hotspotcc ptr addrspace(1) @new_array(ptr %array_klass, i32 %length, ptr %current_thread) [ "deopt"() ]
+  br label %array_return
+
+array_fast_path:
+  store ptr addrspace(1) %tlab_new_top, ptr addrspace(2) %tlab_top_ptr, align 8
+
+  ; Prefetch cache lines for the NEXT allocation in this TLAB. Constant i1 true picks
+  ; AllocatePrefetchLines (array setting) after inline + constant propagation. See
+  ; __jeandle_tlab_prefetch above for the unroll contract.
+  call hotspotcc void @__jeandle_tlab_prefetch(ptr addrspace(1) %tlab_new_top, i1 true)
+
+  ; Header: mark word, klass pointer, length. Order matches HotSpot C1 AArch64
+  ; (c1_MacroAssembler_aarch64.cpp:181-199), which writes header fields without
+  ; inter-field barriers and relies on the trailing release fence for publication.
+  %mark_word_offset = load i32, ptr @oopDesc.mark_offset_in_bytes
+  %mark_word_addr = getelementptr i8, ptr addrspace(1) %tlab_old_top, i32 %mark_word_offset
+
+  %klass_offset = load i32, ptr @oopDesc.klass_offset_in_bytes
+  %klass_addr = getelementptr i8, ptr addrspace(1) %tlab_old_top, i32 %klass_offset
+
+  %length_offset = load i32, ptr @arrayOopDesc.length_offset_in_bytes
+  %length_addr = getelementptr i8, ptr addrspace(1) %tlab_old_top, i32 %length_offset
+
+  %prototype_value = load i64, ptr @markWord.prototype_value
+
+  store atomic i64 %prototype_value, ptr addrspace(1) %mark_word_addr unordered, align 8
+  ; TODO: When UseCompressedClassPointers is enabled, klass should be stored as a 32-bit narrowKlass
+  ; instead of a full pointer. Currently this assumes uncompressed class pointers.
+  ; (Layout offsets -- oopDesc.klass_offset_in_bytes, arrayOopDesc.length_offset_in_bytes,
+  ; arrayOopDesc.base_offset_in_bytes -- are already CCP-aware because they flow through
+  ; oopDesc::klass_offset_in_bytes() / arrayOopDesc::base_offset_in_bytes() on the C++
+  ; side, so only the store width and the encoding (>> CompressedKlassPointers::shift())
+  ; need updating when CCP support is added. instance and array fast paths must be
+  ; upgraded together.)
+  store atomic ptr %array_klass, ptr addrspace(1) %klass_addr unordered, align 8
+  store atomic i32 %length, ptr addrspace(1) %length_addr unordered, align 4
+
+  %zero_tlab = load i1, ptr @VMOptions.ZeroTLAB
+  %skip_clear = and i1 %use_tlab, %zero_tlab
+  br i1 %skip_clear, label %array_init_membar, label %array_clear_memory
+
+array_clear_memory:
+  %base_addr = getelementptr i8, ptr addrspace(1) %tlab_old_top, i32 %base_offset
+  %payload_size = sub i32 %size_in_bytes, %base_offset
+  call void @llvm.memset.p1.i32(ptr addrspace(1) align 8 %base_addr, i8 0, i32 %payload_size, i1 false)
+  br label %array_init_membar
+
+array_init_membar:
+  ; TODO: Same plan as new_instance -- replace atomic stores + fence release with plain
+  ; stores plus a lightweight publish barrier once the supporting LLVM pass lands.
+  fence release
+  br label %array_return
+
+array_return:
+  %array_oop = phi ptr addrspace(1) [ %tlab_old_top, %array_init_membar ], [ %slow_array_oop, %array_slow_path ]
   ret ptr addrspace(1) %array_oop
 }
 
