@@ -32,17 +32,17 @@
 // impl_kind plus the descriptor's exception-edge / GC-state / deopt facts.
 static const char* lowering_mode_name(const JeandleIntrinsicDecision& decision,
                                       const JeandleIntrinsicDescriptor& desc) {
-  const bool needs_inv_edge = desc.needs_exception_edge();
+  const bool needs_unwind_edge = desc.needs_exception_edge();
   switch (decision.impl_kind) {
     case JeandleIntrinsicImplKind::IRInstruction:
     case JeandleIntrinsicImplKind::LLVMBuiltinCall:
       // No PureIRNode descriptor sets needs_exception_edge=true (validated in
       // validate_descriptor); the override below preserves the original semantics
       // in case a future descriptor introduces such a combination.
-      return needs_inv_edge ? "managed-runtime-invoke" : "pure-llvm";
+      return needs_unwind_edge ? "managed-runtime-invoke" : "pure-llvm";
     case JeandleIntrinsicImplKind::HotSpotStub:
     case JeandleIntrinsicImplKind::SharedRuntime:
-      if (needs_inv_edge) return "managed-runtime-invoke";
+      if (needs_unwind_edge) return "managed-runtime-invoke";
       return (desc.needs_gc_state() || desc.may_deopt())
                  ? "managed-runtime-call"
                  : "leaf-runtime-call";
