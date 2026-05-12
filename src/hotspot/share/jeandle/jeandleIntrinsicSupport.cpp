@@ -28,75 +28,56 @@
 #include "runtime/stubRoutines.hpp"
 #include "runtime/vm_version.hpp"
 
-JeandleIntrinsicCapabilities JeandleIntrinsicSupport::query(const JeandleIntrinsicDescriptor& desc) {
-  JeandleIntrinsicCapabilities caps{};
-
-  caps.has_llvm_builtin   = desc.supports_llvm_intrin();
-  caps.hotspot_preferred  = JeandleUseHotspotIntrinsics;
-
-  // CPU-feature guards: some LLVM builtins require specific ISA extensions to
-  // produce a native instruction.  Override has_llvm_builtin to false when the
-  // required feature is absent so that policy falls back to NormalInvoke.
-  //
-  // _floor / _ceil / _rint:
-  //   x86-64  — needs SSE4.1 (ROUNDSD).  Without it LLVM would synthesise a
-  //             slow sequence; matching C2's Matcher::match_rule_supported()
-  //             guard we simply decline to intrinsify.
-  //   AArch64 — FRINTM/FRINTP/FRINTN are part of the ARMv8 base ISA; always ok.
-  //   Other   — conservatively allow; LLVM will pick the best lowering.
-  switch (desc.id) {
+// CPU-feature guards: some LLVM builtins require specific ISA extensions to
+// produce a native instruction.  When the required feature is absent we
+// return false so policy falls back to NormalInvoke.
+//
+// _floor / _ceil / _rint:
+//   x86-64  — needs SSE4.1 (ROUNDSD).  Without it LLVM would synthesise a slow
+//             sequence; matching C2's Matcher::match_rule_supported() we simply
+//             decline to intrinsify.
+//   AArch64 — FRINTM/FRINTP/FRINTN are part of the ARMv8 base ISA; always ok.
+//   Other   — conservatively allow; LLVM will pick the best lowering.
+static bool cpu_supports_llvm_builtin(vmIntrinsics::ID id) {
+  switch (id) {
     case vmIntrinsics::_floor:
     case vmIntrinsics::_ceil:
     case vmIntrinsics::_rint:
 #ifdef AMD64
-      caps.has_llvm_builtin = VM_Version::supports_sse4_1();
+      return VM_Version::supports_sse4_1();
+#else
+      return true;
 #endif
-      break;
     default:
-      break;
+      return true;
   }
+}
 
-  if (!desc.supports_hotspot_stub()) {
-    return caps;
-  }
+// Per-intrinsic stub and SharedRuntime availability probe.
+//   has_hotspot_stub   — the platform-specific stub has been installed.
+//   has_shared_runtime — a SharedRuntime C-linkage function is available as fallback.
+// The libm family (dsin/dcos/.../dpow) all share the same probe shape; the
+// LIBM_PROBE macro keeps each case to one line.  Intrinsics whose stub/runtime
+// shape differs (e.g. countPositives) get their own explicit case below.
+static void probe_hotspot_stubs(vmIntrinsics::ID id, JeandleIntrinsicCapabilities& caps) {
+#define LIBM_PROBE(name)                                                                   \
+  case vmIntrinsics::_##name:                                                              \
+    caps.has_hotspot_stub   = StubRoutines::name() != nullptr;                             \
+    caps.has_shared_runtime = CAST_FROM_FN_PTR(address, SharedRuntime::name) != nullptr;   \
+    break;
 
-  // Per-intrinsic stub and SharedRuntime availability.
-  // has_hotspot_stub: the platform-specific stub has been installed.
-  // has_shared_runtime: a SharedRuntime C-linkage function is available as a fallback.
-  switch (desc.id) {
-    case vmIntrinsics::_dsin:
-      caps.has_hotspot_stub   = StubRoutines::dsin() != nullptr;
-      caps.has_shared_runtime = CAST_FROM_FN_PTR(address, SharedRuntime::dsin) != nullptr;
-      break;
-    case vmIntrinsics::_dcos:
-      caps.has_hotspot_stub   = StubRoutines::dcos() != nullptr;
-      caps.has_shared_runtime = CAST_FROM_FN_PTR(address, SharedRuntime::dcos) != nullptr;
-      break;
-    case vmIntrinsics::_dtan:
-      caps.has_hotspot_stub   = StubRoutines::dtan() != nullptr;
-      caps.has_shared_runtime = CAST_FROM_FN_PTR(address, SharedRuntime::dtan) != nullptr;
-      break;
-    case vmIntrinsics::_dlog:
-      caps.has_hotspot_stub   = StubRoutines::dlog() != nullptr;
-      caps.has_shared_runtime = CAST_FROM_FN_PTR(address, SharedRuntime::dlog) != nullptr;
-      break;
-    case vmIntrinsics::_dlog10:
-      caps.has_hotspot_stub   = StubRoutines::dlog10() != nullptr;
-      caps.has_shared_runtime = CAST_FROM_FN_PTR(address, SharedRuntime::dlog10) != nullptr;
-      break;
-    case vmIntrinsics::_dexp:
-      caps.has_hotspot_stub   = StubRoutines::dexp() != nullptr;
-      caps.has_shared_runtime = CAST_FROM_FN_PTR(address, SharedRuntime::dexp) != nullptr;
-      break;
-    case vmIntrinsics::_dpow:
-      caps.has_hotspot_stub   = StubRoutines::dpow() != nullptr;
-      caps.has_shared_runtime = CAST_FROM_FN_PTR(address, SharedRuntime::dpow) != nullptr;
-      break;
+  switch (id) {
+    LIBM_PROBE(dsin)
+    LIBM_PROBE(dcos)
+    LIBM_PROBE(dtan)
+    LIBM_PROBE(dlog)
+    LIBM_PROBE(dlog10)
+    LIBM_PROBE(dexp)
+    LIBM_PROBE(dpow)
     // countPositives: has_hotspot_stub is true when the platform SIMD adapter has been
     // generated (AArch64: MacroAssembler::count_positives; x86: c2_MacroAssembler::count_positives).
     // has_shared_runtime is always true because the scalar C++ fallback (count_positives_impl)
-    // is unconditionally available.  The policy layer will pick HotSpotStub when available,
-    // otherwise fall through to NormalInvoke via the has_shared_runtime path.
+    // is unconditionally available.
     case vmIntrinsics::_countPositives:
       caps.has_hotspot_stub   = JeandleRuntimeRoutine::count_positives_stub_adapter() != nullptr;
       caps.has_shared_runtime = true;
@@ -104,6 +85,15 @@ JeandleIntrinsicCapabilities JeandleIntrinsicSupport::query(const JeandleIntrins
     default:
       break;
   }
+#undef LIBM_PROBE
+}
 
+JeandleIntrinsicCapabilities JeandleIntrinsicSupport::query(const JeandleIntrinsicDescriptor& desc) {
+  JeandleIntrinsicCapabilities caps{};
+  caps.has_llvm_builtin  = desc.supports_llvm_intrin() && cpu_supports_llvm_builtin(desc.id);
+  caps.hotspot_preferred = JeandleUseHotspotIntrinsics;
+  if (desc.supports_hotspot_stub()) {
+    probe_hotspot_stubs(desc.id, caps);
+  }
   return caps;
 }
