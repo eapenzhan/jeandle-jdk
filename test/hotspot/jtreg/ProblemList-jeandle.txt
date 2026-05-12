@@ -532,3 +532,14 @@ serviceability/sa/TestHeapDumpForInvokeDynamic.java                             
 # Core dump written to non-standard location (/home/admin/logs/core.%p); test can't find core file
 serviceability/sa/TestJmapCore.java                                                            linux-aarch64,linux-x64
 serviceability/sa/TestJmapCoreMetaspace.java                                                   linux-aarch64,linux-x64
+
+###
+# timeout due to unimplemented vm option `InlineUnsafeOps`
+###
+compiler/loopopts/superword/TestLargeScaleAndStride.java#vanilla                               linux-aarch64,linux-x64
+compiler/loopopts/superword/TestLargeScaleAndStride.java#AlignVector                           linux-aarch64,linux-x64
+
+###
+# fails due to `Math.log` (issue #424)
+###
+compiler/interpreter/Test6539464.java                                                          linux-aarch64
