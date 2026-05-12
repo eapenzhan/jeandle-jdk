@@ -38,13 +38,13 @@ static bool is_managed_runtime_call(JeandleIntrinsicImplKind impl_kind,
 
 static JeandleIRSemanticPlan make_plan(const JeandleIntrinsicDescriptor& desc,
                                        JeandleIntrinsicImplKind impl_kind) {
-  const bool is_javaop      = (impl_kind == JeandleIntrinsicImplKind::JavaOperation);
-  const bool is_pure_llvm   = (impl_kind == JeandleIntrinsicImplKind::IRInstruction ||
-                               impl_kind == JeandleIntrinsicImplKind::LLVMBuiltinCall);
-  const bool is_managed     = is_managed_runtime_call(impl_kind, desc);
-  const bool is_leaf_call   = (impl_kind == JeandleIntrinsicImplKind::HotSpotStub ||
-                               impl_kind == JeandleIntrinsicImplKind::SharedRuntime) && !is_managed;
-  const bool needs_inv_edge = desc.needs_exception_edge() && !is_javaop;
+  const bool is_javaop         = (impl_kind == JeandleIntrinsicImplKind::JavaOperation);
+  const bool is_pure_llvm      = (impl_kind == JeandleIntrinsicImplKind::IRInstruction ||
+                                  impl_kind == JeandleIntrinsicImplKind::LLVMBuiltinCall);
+  const bool is_managed        = is_managed_runtime_call(impl_kind, desc);
+  const bool is_leaf_call      = (impl_kind == JeandleIntrinsicImplKind::HotSpotStub ||
+                                  impl_kind == JeandleIntrinsicImplKind::SharedRuntime) && !is_managed;
+  const bool needs_unwind_edge = desc.needs_exception_edge() && !is_javaop;
 
   JeandleIRSemanticPlan plan{};
 
@@ -55,7 +55,7 @@ static JeandleIRSemanticPlan make_plan(const JeandleIntrinsicDescriptor& desc,
   //   - the call is a JavaOp (conservatively non-leaf until JavaOp infrastructure can
   //     derive precise bundle requirements).
   plan.attach_deopt_bundle = desc.may_deopt() || desc.needs_gc_state() ||
-                             is_managed || needs_inv_edge || is_javaop;
+                             is_managed || needs_unwind_edge || is_javaop;
 
   // gc-leaf-function attribute is only correct on truly side-effect-free leaf paths:
   // pure LLVM IR or a leaf runtime call with no GC/exception/deopt interaction.
@@ -117,6 +117,14 @@ static bool too_many_traps_for_any_reason(const ciMethod* caller, int bci,
   return false;
 }
 
+// Pick the best available HotSpot runtime path, preferring the dedicated stub
+// over the generic SharedRuntime entry.  Returns Unsupported if neither exists.
+static JeandleIntrinsicImplKind try_hotspot_path(const JeandleIntrinsicCapabilities& caps) {
+  if (caps.has_hotspot_stub)   return JeandleIntrinsicImplKind::HotSpotStub;
+  if (caps.has_shared_runtime) return JeandleIntrinsicImplKind::SharedRuntime;
+  return JeandleIntrinsicImplKind::Unsupported;
+}
+
 JeandleIntrinsicDecision JeandleIntrinsicPolicy::refine(const JeandleIntrinsicDecision& base,
                                                         const JeandleIntrinsicDescriptor& desc,
                                                         JeandleIntrinsicImplKind refined_kind) {
@@ -143,44 +151,28 @@ JeandleIntrinsicDecision JeandleIntrinsicPolicy::decide(const JeandleIntrinsicDe
     }
 
     case JeandleLoweringKind::RuntimeLeafCall: {
-      // Trap-based admission throttle is descriptor-driven and already handled above.
+      // RuntimeLeafCall: HotSpot paths win only when the global preference flag is on.
+      // Without that flag we stay on the LLVM builtin (if any) and ignore HotSpot.
       JeandleIntrinsicCapabilities caps = JeandleIntrinsicSupport::query(desc);
-      if (!caps.any_path()) {
-        return unsupported(desc);
+      if (caps.hotspot_preferred) {
+        JeandleIntrinsicImplKind k = try_hotspot_path(caps);
+        if (k != JeandleIntrinsicImplKind::Unsupported) return make_decision(desc, k);
       }
-      if (caps.hotspot_preferred && caps.has_hotspot_stub) {
-        return make_decision(desc, JeandleIntrinsicImplKind::HotSpotStub);
-      }
-      if (caps.hotspot_preferred && caps.has_shared_runtime) {
-        return make_decision(desc, JeandleIntrinsicImplKind::SharedRuntime);
-      }
-      if (caps.has_llvm_builtin) {
-        return make_decision(desc, JeandleIntrinsicImplKind::LLVMBuiltinCall);
-      }
+      if (caps.has_llvm_builtin) return make_decision(desc, JeandleIntrinsicImplKind::LLVMBuiltinCall);
       return unsupported(desc);
     }
 
     case JeandleLoweringKind::GuardedHybrid: {
-      // Resolve the general (non-constant-specialized) lowering sub-kind so that
-      // lower_*_hybrid() can switch on impl_kind directly.  Constant fast paths
-      // (e.g. pow(x,2) -> fmul) are chosen at lowering time and call refine() to
-      // produce accurate per-instruction metadata.
+      // GuardedHybrid: LLVM builtin is the default; HotSpot only wins when explicitly
+      // preferred AND a HotSpot runtime path exists.  Constant fast paths
+      // (e.g. pow(x,2) -> fmul) are chosen at lowering time and call refine().
       JeandleIntrinsicCapabilities caps = JeandleIntrinsicSupport::query(desc);
-      if (!caps.any_path()) {
-        return unsupported(desc);
+      const bool hotspot_first = caps.hotspot_preferred && caps.any_runtime();
+      if (hotspot_first) {
+        JeandleIntrinsicImplKind k = try_hotspot_path(caps);
+        if (k != JeandleIntrinsicImplKind::Unsupported) return make_decision(desc, k);
       }
-      if (caps.has_llvm_builtin && (!caps.hotspot_preferred || !caps.any_runtime())) {
-        return make_decision(desc, JeandleIntrinsicImplKind::LLVMBuiltinCall);
-      }
-      if (caps.has_hotspot_stub) {
-        return make_decision(desc, JeandleIntrinsicImplKind::HotSpotStub);
-      }
-      if (caps.has_shared_runtime) {
-        return make_decision(desc, JeandleIntrinsicImplKind::SharedRuntime);
-      }
-      if (caps.has_llvm_builtin) {
-        return make_decision(desc, JeandleIntrinsicImplKind::LLVMBuiltinCall);
-      }
+      if (caps.has_llvm_builtin) return make_decision(desc, JeandleIntrinsicImplKind::LLVMBuiltinCall);
       return unsupported(desc);
     }
 
