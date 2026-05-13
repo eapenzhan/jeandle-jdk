@@ -32,10 +32,38 @@ class JeandleAbstractInterpreter;
 
 struct JeandleIntrinsicEntrypoint;
 
-// Projects an already-chosen intrinsic policy into LLVM IR details: operand
-// bundles, metadata, and call attributes.  Logically a continuation of Policy,
-// kept in a separate file only to isolate the LLVM/AbstractInterpreter
-// dependencies from Policy's pure ciMethod-only headers.
+// Translates an intrinsic decision into LLVM IR-level facts: operand bundles,
+// call attributes, and metadata.  This is its own layer in the framework,
+// peer to Policy and Lowering rather than a continuation of Policy:
+//
+//   Policy answers "which impl_kind should we use here".
+//   IRSemantics answers "given that impl_kind, what IR-level facts must be
+//   attached so downstream LLVM passes behave correctly and so the lowering
+//   contract is observable in IR dumps".
+//   Lowering answers "now emit the actual instructions".
+//
+// IRSemantics evolves on its own axis: new GC-aware metadata, new alias/
+// noalias attributes, new keys synchronised with jeandle-llvm passes — all
+// land here without touching Policy or the descriptor.  It depends on the
+// LLVM headers and on AbstractInterpreter; Policy stays ciMethod-only.
+//
+// Two kinds of facts are attached to the emitted IR here:
+//
+//   1. Behavioural contracts consumed by LLVM passes today.
+//      - The "gc-leaf-function" function attribute is read by
+//        RewriteStatepointsForGC to skip statepoint insertion on leaf calls.
+//      - The "deopt" operand bundle (built by build_operand_bundles) feeds the
+//        same pass with the interpreter state needed to materialise deopts.
+//
+//   2. Observability labels reserved as a forward contract for GC-aware /
+//      barrier-aware LLVM passes that have not yet been written:
+//        jeandle.intrinsic.id, jeandle.lowering.mode,
+//        jeandle.semantic.barrier_kind, jeandle.runtime.entry.
+//      These have no LLVM-side consumer today; they appear in IR dumps and
+//      serve as a stable place for a future pass (e.g. one that reads
+//      barrier_kind to emit collector-specific barriers) to plug in without
+//      re-threading the descriptor through the lowering layer.  Treat them as
+//      part of the IR contract: keep the strings stable, do not relocate.
 class JeandleIntrinsicIRSemantics : public AllStatic {
  public:
   static llvm::SmallVector<llvm::OperandBundleDef, 1> build_operand_bundles(JeandleAbstractInterpreter* interp,

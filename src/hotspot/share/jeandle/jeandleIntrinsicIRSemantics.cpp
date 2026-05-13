@@ -89,8 +89,10 @@ void JeandleIntrinsicIRSemantics::annotate_instruction(llvm::Instruction& inst,
                                                        const JeandleIntrinsicDescriptor& desc,
                                                        const JeandleIntrinsicDecision& decision,
                                                        const JeandleIntrinsicEntrypoint* entry) {
-  // Jeandle semantic annotations go on the instruction as named metadata so
-  // they are isolated from function-attribute groups (which affect code-gen).
+  // Observability labels (see class header for the forward-contract rationale).
+  // No LLVM pass consumes these today; they live in IR dumps as a stable plug
+  // point for a future GC-aware / barrier-aware pass.  Stored as named
+  // metadata so they do not pollute function-attribute groups.
   set_str_metadata(inst, "jeandle.intrinsic.id",
                    std::to_string(vmIntrinsics::as_int(desc.id)));
   set_str_metadata(inst, "jeandle.lowering.mode",
@@ -100,12 +102,14 @@ void JeandleIntrinsicIRSemantics::annotate_instruction(llvm::Instruction& inst,
 
   if (auto* call = llvm::dyn_cast<llvm::CallBase>(&inst)) {
     llvm::LLVMContext& ctx = inst.getContext();
-    // gc-leaf-function must stay as a function attribute — it is consumed by
-    // RewriteStatepointsForGC to skip statepoint insertion.
+    // Real behavioural contract: gc-leaf-function is a function attribute read
+    // by RewriteStatepointsForGC to skip statepoint insertion.  This is the
+    // one IR fact in this file that LLVM actually acts on today.
     if (decision.ir_plan.attach_gc_leaf_attr || (entry != nullptr && entry->is_gc_leaf)) {
       call->addFnAttr(llvm::Attribute::get(ctx, "gc-leaf-function"));
     }
     if (entry != nullptr && entry->well_known_name != nullptr) {
+      // Observability label, same forward-contract rationale as the three above.
       set_str_metadata(inst, "jeandle.runtime.entry", entry->well_known_name);
     }
   }
