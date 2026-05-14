@@ -1604,6 +1604,14 @@ bool JeandleAbstractInterpreter::try_lower_intrinsic(const ciMethod* target) {
     return false;
   }
 
+  // Honour HotSpot's standard -XX:DisableIntrinsic=<list> / -XX:ControlIntrinsic
+  // flags. When the id is disabled the caller falls back to a normal invoke,
+  // matching the behaviour of C1/C2 and giving Jeandle a deterministic way to
+  // run baseline comparisons against the intrinsic-lowered path.
+  if (vmIntrinsics::is_disabled_by_flags(desc->id)) {
+    return false;
+  }
+
   JeandleIntrinsicPolicy policy;
   JeandleIntrinsicDecision decision = policy.decide(*desc, _method, _bytecodes.cur_bci());
   if (!decision.supported) {
