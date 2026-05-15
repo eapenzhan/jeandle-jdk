@@ -315,6 +315,13 @@
       llvm::Type::getInt32Ty(context),                                              \
       llvm::PointerType::get(context, llvm::jeandle::AddrSpace::JavaHeapAddrSpace), \
       llvm::Type::getInt32Ty(context))                                              \
+                                                                                    \
+  def(SharedRuntime_OSR_migration_end,                                              \
+      SharedRuntime::OSR_migration_end,                                             \
+      false,                                                                        \
+      true,                                                                         \
+      llvm::Type::getVoidTy(context),                                               \
+      llvm::PointerType::get(context, llvm::jeandle::AddrSpace::CHeapAddrSpace))    \
 
 #define ALL_JEANDLE_ASSEMBLY_ROUTINES(def) \
   def(exceptional_return)                  \
