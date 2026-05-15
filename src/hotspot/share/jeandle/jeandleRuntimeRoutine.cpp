@@ -160,12 +160,17 @@ JRT_BLOCK_ENTRY(void, JeandleRuntimeRoutine::new_array(Klass* array_type, int le
     BasicType elem_type = TypeArrayKlass::cast(array_type)->element_type();
     result = oopFactory::new_typeArray(elem_type, len, THREAD);
   } else {
-    // Although the oopFactory likes to work with the elem_type,
-    // the compiler prefers the array_type, since it must already have
-    // that latter value in hand for the fast path.
+    // We already hold the ObjArrayKlass; call its allocate() directly instead
+    // of routing through oopFactory::new_objArray, which would unwrap us to the
+    // element InstanceKlass and then re-resolve the array_klass via
+    // InstanceKlass::array_klass(1) (an acquire-load on array_klasses).
+    // OptoRuntime::new_array_C kept that detour because it is a cold fallback
+    // in C2 (inline TLAB bump-pointer handles the hot path); in Jeandle's
+    // _newArray lowering this runtime call is the hot path and the redundant
+    // re-lookup was measurable (~13% slower than the non-intrinsic invoke
+    // path on String[] allocation, AArch64).
     Handle holder(current, array_type->klass_holder()); // keep the array klass alive
-    Klass* elem_type = ObjArrayKlass::cast(array_type)->element_klass();
-    result = oopFactory::new_objArray(elem_type, len, THREAD);
+    result = ObjArrayKlass::cast(array_type)->allocate(len, THREAD);
   }
 
   // Pass oops back through thread local storage.  Our apparent type to Java
