@@ -36,9 +36,10 @@ static const char* lowering_mode_name(const JeandleIntrinsicDecision& decision,
   switch (decision.impl_kind) {
     case JeandleIntrinsicImplKind::IRInstruction:
     case JeandleIntrinsicImplKind::LLVMBuiltinCall:
-      // No PureIRNode descriptor sets needs_exception_edge=true (validated in
-      // validate_descriptor); the override below preserves the original semantics
-      // in case a future descriptor introduces such a combination.
+      // No pure-IR descriptor (PureIRInstruction / PureLLVMBuiltin) sets
+      // needs_exception_edge=true (validated in validate_descriptor); the
+      // override below preserves the original semantics in case a future
+      // descriptor introduces such a combination.
       return needs_unwind_edge ? "managed-runtime-invoke" : "pure-llvm";
     case JeandleIntrinsicImplKind::HotSpotStub:
     case JeandleIntrinsicImplKind::SharedRuntime:

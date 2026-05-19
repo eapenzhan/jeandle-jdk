@@ -73,7 +73,7 @@ void JeandleIntrinsicLowering::annotate_generated_instruction(llvm::Instruction&
 }
 
 // Mirror PR #430's call-site type-info attachment for object-returning intrinsics:
-// the regular invoke() path runs this via maybe_attach_java_klass_ret_attr at
+// the regular invoke() path runs this via attach_java_klass_ret_attr at
 // jeandleAbstractInterpreter.cpp around line 1593, but intrinsic dispatch returns
 // from invoke() before that point. Centralizing here keeps every CallBase the
 // emit helpers produce on the same JavaKlass / JavaKlassExact contract as the
@@ -82,7 +82,7 @@ void JeandleIntrinsicLowering::attach_callee_return_klass_attr(llvm::CallBase* c
   if (_target == nullptr) {
     return;
   }
-  maybe_attach_java_klass_ret_attr(call,
+  attach_java_klass_ret_attr(call,
                                    _target->signature()->return_type(),
                                    *_interp->_context);
 }
@@ -141,43 +141,68 @@ bool JeandleIntrinsicLowering::lower(const JeandleIntrinsicDescriptor& desc,
                                      const JeandleIntrinsicDecision& decision,
                                      const ciMethod* target) {
   _target = target;
-  // Two-level dispatch: the descriptor category selects the shared lowering
-  // shape, then category-specific code switches on the precise intrinsic ID.
-  switch (desc.category) {
-    case JeandleIntrinsicCategory::PureMath:
+  // Dispatch on the precise intrinsic ID, mirroring C2's
+  // LibraryCallKit::try_to_inline. Intrinsics that share a lowering shape route
+  // to the same lower_* helper; that helper may switch on the ID again for the
+  // per-intrinsic details.
+  switch (desc.id) {
+    case vmIntrinsics::_dabs:
+    case vmIntrinsics::_fabs:
+    case vmIntrinsics::_iabs:
+    case vmIntrinsics::_labs:
+    case vmIntrinsics::_bitCount_i:
+    case vmIntrinsics::_bitCount_l:
+    case vmIntrinsics::_dsqrt:
+    case vmIntrinsics::_dsqrt_strict:
+    case vmIntrinsics::_floor:
+    case vmIntrinsics::_ceil:
+    case vmIntrinsics::_rint:
       return lower_pure_math(desc, decision);
-    case JeandleIntrinsicCategory::TypeCoercion:
+
+    case vmIntrinsics::_floatToRawIntBits:
+    case vmIntrinsics::_intBitsToFloat:
+    case vmIntrinsics::_doubleToRawLongBits:
+    case vmIntrinsics::_longBitsToDouble:
       return lower_type_coercion(desc, decision);
-    case JeandleIntrinsicCategory::LibmMath:
-      if (desc.id == vmIntrinsics::_dpow) {
-        return lower_pow_hybrid(desc, decision);
-      }
+
+    case vmIntrinsics::_dpow:
+      return lower_pow_hybrid(desc, decision);
+
+    case vmIntrinsics::_dsin:
+    case vmIntrinsics::_dcos:
+    case vmIntrinsics::_dtan:
+    case vmIntrinsics::_dlog:
+    case vmIntrinsics::_dlog10:
+    case vmIntrinsics::_dexp:
       return lower_libm_math(desc, decision);
-    case JeandleIntrinsicCategory::BarrierSemantic:
+
+    case vmIntrinsics::_loadFence:
+    case vmIntrinsics::_storeFence:
+    case vmIntrinsics::_fullFence:
       return lower_barrier_semantic(desc, decision);
-    case JeandleIntrinsicCategory::MacroSemantic:
+
+    case vmIntrinsics::_onSpinWait:
+    case vmIntrinsics::_blackhole:
+    case vmIntrinsics::_Preconditions_checkIndex:
+    case vmIntrinsics::_Preconditions_checkLongIndex:
       return lower_macro_semantic(desc, decision);
-    case JeandleIntrinsicCategory::TypeSemantic:
-      if (desc.id == vmIntrinsics::_getClass) {
-        return lower_get_class(desc, decision);
-      }
-      return false;
-    case JeandleIntrinsicCategory::MemorySemantic:
-      if (desc.id == vmIntrinsics::_Reference_get) {
-        return lower_reference_get(desc, decision);
-      }
-      if (desc.id == vmIntrinsics::_Reference_refersTo0 ||
-          desc.id == vmIntrinsics::_PhantomReference_refersTo0) {
-        return lower_reference_refers_to(desc, decision);
-      }
-      return false;
-    case JeandleIntrinsicCategory::ArrayScan:
+
+    case vmIntrinsics::_getClass:
+      return lower_get_class(desc, decision);
+
+    case vmIntrinsics::_Reference_get:
+      return lower_reference_get(desc, decision);
+
+    case vmIntrinsics::_Reference_refersTo0:
+    case vmIntrinsics::_PhantomReference_refersTo0:
+      return lower_reference_refers_to(desc, decision);
+
+    case vmIntrinsics::_countPositives:
       return lower_count_positives(desc, decision);
-    case JeandleIntrinsicCategory::AllocationSemantic:
-      if (desc.id == vmIntrinsics::_newArray) {
-        return lower_new_array(desc, decision);
-      }
-      return false;
+
+    case vmIntrinsics::_newArray:
+      return lower_new_array(desc, decision);
+
     default:
       return false;
   }

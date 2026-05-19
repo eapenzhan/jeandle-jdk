@@ -139,36 +139,27 @@ JeandleIntrinsicDecision JeandleIntrinsicPolicy::decide(const JeandleIntrinsicDe
   }
 
   switch (desc.lowering_kind) {
-    case JeandleLoweringKind::PureIRNode: {
-      // PureIRNode intrinsics are unconditionally supported; the impl_kind is
-      // determined by category alone (no capability query needed).
-      const JeandleIntrinsicImplKind k =
-          (desc.category == JeandleIntrinsicCategory::TypeCoercion ||
-           desc.category == JeandleIntrinsicCategory::BarrierSemantic)
-              ? JeandleIntrinsicImplKind::IRInstruction
-              : JeandleIntrinsicImplKind::LLVMBuiltinCall;
-      return make_decision(desc, k);
-    }
+    case JeandleLoweringKind::PureIRInstruction:
+      // Bare LLVM IR instruction (bitcast, fence). Unconditionally supported,
+      // no capability query needed.
+      return make_decision(desc, JeandleIntrinsicImplKind::IRInstruction);
 
-    case JeandleLoweringKind::RuntimeLeafCall: {
-      // RuntimeLeafCall: HotSpot paths win only when the global preference flag is on.
-      // Without that flag we stay on the LLVM builtin (if any) and ignore HotSpot.
-      JeandleIntrinsicCapabilities caps = JeandleIntrinsicSupport::query(desc);
-      if (caps.hotspot_preferred) {
-        JeandleIntrinsicImplKind k = try_hotspot_path(caps);
-        if (k != JeandleIntrinsicImplKind::Unsupported) return make_decision(desc, k);
-      }
-      if (caps.has_llvm_builtin) return make_decision(desc, JeandleIntrinsicImplKind::LLVMBuiltinCall);
-      return unsupported(desc);
-    }
+    case JeandleLoweringKind::PureLLVMBuiltin:
+      // Named llvm.* builtin or platform-specific LLVM target intrinsic.
+      // Unconditionally supported, no capability query needed.
+      return make_decision(desc, JeandleIntrinsicImplKind::LLVMBuiltinCall);
 
+    case JeandleLoweringKind::RuntimeLeafCall:
     case JeandleLoweringKind::GuardedHybrid: {
-      // GuardedHybrid: LLVM builtin is the default; HotSpot only wins when explicitly
-      // preferred AND a HotSpot runtime path exists.  Constant fast paths
-      // (e.g. pow(x,2) -> fmul) are chosen at lowering time and call refine().
+      // RuntimeLeafCall and GuardedHybrid share identical policy logic: a HotSpot
+      // path wins only when it is preferred AND an actual runtime path exists,
+      // otherwise the LLVM builtin. The two descriptor kinds differ only in the
+      // lowering function body — a GuardedHybrid lowering (e.g. lower_pow_hybrid)
+      // emits its own fast/slow guard, a RuntimeLeafCall lowering is a straight
+      // call — which policy does not influence. The distinct names are kept as a
+      // descriptor-level semantic label.
       JeandleIntrinsicCapabilities caps = JeandleIntrinsicSupport::query(desc);
-      const bool hotspot_first = caps.hotspot_preferred && caps.any_runtime();
-      if (hotspot_first) {
+      if (caps.hotspot_preferred && caps.any_runtime()) {
         JeandleIntrinsicImplKind k = try_hotspot_path(caps);
         if (k != JeandleIntrinsicImplKind::Unsupported) return make_decision(desc, k);
       }

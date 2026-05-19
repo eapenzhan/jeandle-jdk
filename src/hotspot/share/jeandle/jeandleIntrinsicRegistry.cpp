@@ -22,6 +22,28 @@
 #include "jeandle/__hotspotHeadersBegin__.hpp"
 #include "ci/ciMethod.hpp"
 
+// =============================================================================
+// How to add a new intrinsic to Jeandle
+// -----------------------------------------------------------------------------
+// 1. Add a JeandleIntrinsicDescriptor entry to _intrinsic_table below: pick the
+//    control/memory flags, barrier_kind, lowering_kind, support_flags and (for
+//    JavaOperation) java_op_name. The table is the single source of static
+//    semantics for the intrinsic.
+// 2. jeandleIntrinsicSupport.cpp — if the intrinsic has a HotSpot stub or a
+//    SharedRuntime fallback, add a probe so JeandleIntrinsicCapabilities reports
+//    has_hotspot_stub / has_shared_runtime correctly. Pure IR / pure JavaOp
+//    intrinsics need no change here.
+// 3. jeandleIntrinsicPolicy.cpp — usually no change; decide() already handles
+//    every JeandleLoweringKind. Only touch it for a genuinely new strategy.
+// 4. jeandleIntrinsicLowering.cpp — add a `case vmIntrinsics::_yourId:` to
+//    lower() routing to a lower_* helper, and implement that helper. Prefer the
+//    shared emit helpers (emit_runtime_call / emit_java_op_call / ...).
+// 5. For JavaOperation intrinsics, define the JavaOp in templatemodule/
+//    template.ll or jeandleRuntimeDefinedJavaOps.cpp.
+// See jeandle-docs/intrinsics/intrinsic-framework.md ("Adding a New Intrinsic")
+// for the full step-by-step contract, pitfalls, and worked examples.
+// =============================================================================
+
 static constexpr JeandleTrapReasonMask trap_reason_mask(Deoptimization::DeoptReason reason) {
   return JeandleTrapReasonMask(1u) << static_cast<uint>(reason);
 }
@@ -30,9 +52,10 @@ static constexpr JeandleTrapReasonMask trap_reason_mask(Deoptimization::DeoptRea
 static void validate_descriptor(const JeandleIntrinsicDescriptor& desc) {
   assert(desc.id != vmIntrinsics::_none && vmIntrinsics::is_valid_id(desc.id),
          "invalid Jeandle intrinsic id");
-  assert(desc.lowering_kind != JeandleLoweringKind::PureIRNode ||
+  assert((desc.lowering_kind != JeandleLoweringKind::PureIRInstruction &&
+          desc.lowering_kind != JeandleLoweringKind::PureLLVMBuiltin) ||
          !desc.needs_exception_edge(),
-         "PureIRNode cannot require an exception edge");
+         "pure-IR lowering kinds cannot require an exception edge");
   assert(desc.trap_throttle_mask == 0 || desc.may_deopt(),
          "trap throttling requires a deopt-capable intrinsic");
   assert(desc.lowering_kind != JeandleLoweringKind::JavaOperation || desc.java_op_name != nullptr,
@@ -55,7 +78,6 @@ class JeandleIntrinsicRegistryTable : public AllStatic {
  private:
   // Descriptor fields, in order:
   //   id
-  //   category
   //   control_flags  (bitmask of CTRL_*)
   //   memory_flags   (bitmask of MEM_*)
   //   barrier_kind
@@ -68,114 +90,114 @@ class JeandleIntrinsicRegistryTable : public AllStatic {
   // declarative list of facts about each intrinsic without consulting struct
   // definitions for what each bool position means.
   static constexpr JeandleIntrinsicDescriptor _intrinsic_table[] = {
-    { vmIntrinsics::_dabs,                JeandleIntrinsicCategory::PureMath,
+    { vmIntrinsics::_dabs,
       CTRL_NONE,                          MEM_NONE,
-      JeandleMemoryBarrierKind::None,     JeandleLoweringKind::PureIRNode,
+      JeandleMemoryBarrierKind::None,     JeandleLoweringKind::PureLLVMBuiltin,
       SUPPORT_LLVM_INTRIN,                nullptr },
-    { vmIntrinsics::_fabs,                JeandleIntrinsicCategory::PureMath,
+    { vmIntrinsics::_fabs,
       CTRL_NONE,                          MEM_NONE,
-      JeandleMemoryBarrierKind::None,     JeandleLoweringKind::PureIRNode,
+      JeandleMemoryBarrierKind::None,     JeandleLoweringKind::PureLLVMBuiltin,
       SUPPORT_LLVM_INTRIN,                nullptr },
-    { vmIntrinsics::_iabs,                JeandleIntrinsicCategory::PureMath,
+    { vmIntrinsics::_iabs,
       CTRL_NONE,                          MEM_NONE,
-      JeandleMemoryBarrierKind::None,     JeandleLoweringKind::PureIRNode,
+      JeandleMemoryBarrierKind::None,     JeandleLoweringKind::PureLLVMBuiltin,
       SUPPORT_LLVM_INTRIN,                nullptr },
-    { vmIntrinsics::_labs,                JeandleIntrinsicCategory::PureMath,
+    { vmIntrinsics::_labs,
       CTRL_NONE,                          MEM_NONE,
-      JeandleMemoryBarrierKind::None,     JeandleLoweringKind::PureIRNode,
+      JeandleMemoryBarrierKind::None,     JeandleLoweringKind::PureLLVMBuiltin,
       SUPPORT_LLVM_INTRIN,                nullptr },
-    { vmIntrinsics::_bitCount_i,          JeandleIntrinsicCategory::PureMath,
+    { vmIntrinsics::_bitCount_i,
       CTRL_NONE,                          MEM_NONE,
-      JeandleMemoryBarrierKind::None,     JeandleLoweringKind::PureIRNode,
+      JeandleMemoryBarrierKind::None,     JeandleLoweringKind::PureLLVMBuiltin,
       SUPPORT_LLVM_INTRIN,                nullptr },
-    { vmIntrinsics::_bitCount_l,          JeandleIntrinsicCategory::PureMath,
+    { vmIntrinsics::_bitCount_l,
       CTRL_NONE,                          MEM_NONE,
-      JeandleMemoryBarrierKind::None,     JeandleLoweringKind::PureIRNode,
+      JeandleMemoryBarrierKind::None,     JeandleLoweringKind::PureLLVMBuiltin,
       SUPPORT_LLVM_INTRIN,                nullptr },
-    { vmIntrinsics::_dsqrt,               JeandleIntrinsicCategory::PureMath,
+    { vmIntrinsics::_dsqrt,
       CTRL_NONE,                          MEM_NONE,
-      JeandleMemoryBarrierKind::None,     JeandleLoweringKind::PureIRNode,
+      JeandleMemoryBarrierKind::None,     JeandleLoweringKind::PureLLVMBuiltin,
       SUPPORT_LLVM_INTRIN,                nullptr },
-    { vmIntrinsics::_dsqrt_strict,        JeandleIntrinsicCategory::PureMath,
+    { vmIntrinsics::_dsqrt_strict,
       CTRL_NONE,                          MEM_NONE,
-      JeandleMemoryBarrierKind::None,     JeandleLoweringKind::PureIRNode,
+      JeandleMemoryBarrierKind::None,     JeandleLoweringKind::PureLLVMBuiltin,
       SUPPORT_LLVM_INTRIN,                nullptr },
 
     // Rounding: GuardedHybrid because a native instruction is required for
     // correctness/performance (SSE4.1 ROUNDSD on x86, FRINT* on AArch64).
     // JeandleIntrinsicSupport::query() checks the CPU feature at decision time;
     // if absent, any_path() returns false and the call is not intrinsified.
-    { vmIntrinsics::_floor,               JeandleIntrinsicCategory::PureMath,
+    { vmIntrinsics::_floor,
       CTRL_NONE,                          MEM_NONE,
       JeandleMemoryBarrierKind::None,     JeandleLoweringKind::GuardedHybrid,
       SUPPORT_LLVM_INTRIN,                nullptr },
-    { vmIntrinsics::_ceil,                JeandleIntrinsicCategory::PureMath,
+    { vmIntrinsics::_ceil,
       CTRL_NONE,                          MEM_NONE,
       JeandleMemoryBarrierKind::None,     JeandleLoweringKind::GuardedHybrid,
       SUPPORT_LLVM_INTRIN,                nullptr },
-    { vmIntrinsics::_rint,                JeandleIntrinsicCategory::PureMath,
+    { vmIntrinsics::_rint,
       CTRL_NONE,                          MEM_NONE,
       JeandleMemoryBarrierKind::None,     JeandleLoweringKind::GuardedHybrid,
       SUPPORT_LLVM_INTRIN,                nullptr },
 
-    { vmIntrinsics::_floatToRawIntBits,   JeandleIntrinsicCategory::TypeCoercion,
+    { vmIntrinsics::_floatToRawIntBits,
       CTRL_NONE,                          MEM_NONE,
-      JeandleMemoryBarrierKind::None,     JeandleLoweringKind::PureIRNode,
+      JeandleMemoryBarrierKind::None,     JeandleLoweringKind::PureIRInstruction,
       SUPPORT_LLVM_INTRIN,                nullptr },
-    { vmIntrinsics::_intBitsToFloat,      JeandleIntrinsicCategory::TypeCoercion,
+    { vmIntrinsics::_intBitsToFloat,
       CTRL_NONE,                          MEM_NONE,
-      JeandleMemoryBarrierKind::None,     JeandleLoweringKind::PureIRNode,
+      JeandleMemoryBarrierKind::None,     JeandleLoweringKind::PureIRInstruction,
       SUPPORT_LLVM_INTRIN,                nullptr },
-    { vmIntrinsics::_doubleToRawLongBits, JeandleIntrinsicCategory::TypeCoercion,
+    { vmIntrinsics::_doubleToRawLongBits,
       CTRL_NONE,                          MEM_NONE,
-      JeandleMemoryBarrierKind::None,     JeandleLoweringKind::PureIRNode,
+      JeandleMemoryBarrierKind::None,     JeandleLoweringKind::PureIRInstruction,
       SUPPORT_LLVM_INTRIN,                nullptr },
-    { vmIntrinsics::_longBitsToDouble,    JeandleIntrinsicCategory::TypeCoercion,
+    { vmIntrinsics::_longBitsToDouble,
       CTRL_NONE,                          MEM_NONE,
-      JeandleMemoryBarrierKind::None,     JeandleLoweringKind::PureIRNode,
+      JeandleMemoryBarrierKind::None,     JeandleLoweringKind::PureIRInstruction,
       SUPPORT_LLVM_INTRIN,                nullptr },
 
-    { vmIntrinsics::_dsin,                JeandleIntrinsicCategory::LibmMath,
+    { vmIntrinsics::_dsin,
       CTRL_NONE,                          MEM_NONE,
       JeandleMemoryBarrierKind::None,     JeandleLoweringKind::RuntimeLeafCall,
       SUPPORT_HOTSPOT_STUB | SUPPORT_LLVM_INTRIN, nullptr },
-    { vmIntrinsics::_dcos,                JeandleIntrinsicCategory::LibmMath,
+    { vmIntrinsics::_dcos,
       CTRL_NONE,                          MEM_NONE,
       JeandleMemoryBarrierKind::None,     JeandleLoweringKind::RuntimeLeafCall,
       SUPPORT_HOTSPOT_STUB | SUPPORT_LLVM_INTRIN, nullptr },
-    { vmIntrinsics::_dtan,                JeandleIntrinsicCategory::LibmMath,
+    { vmIntrinsics::_dtan,
       CTRL_NONE,                          MEM_NONE,
       JeandleMemoryBarrierKind::None,     JeandleLoweringKind::RuntimeLeafCall,
       SUPPORT_HOTSPOT_STUB | SUPPORT_LLVM_INTRIN, nullptr },
-    { vmIntrinsics::_dlog,                JeandleIntrinsicCategory::LibmMath,
+    { vmIntrinsics::_dlog,
       CTRL_NONE,                          MEM_NONE,
       JeandleMemoryBarrierKind::None,     JeandleLoweringKind::RuntimeLeafCall,
       SUPPORT_HOTSPOT_STUB | SUPPORT_LLVM_INTRIN, nullptr },
-    { vmIntrinsics::_dlog10,              JeandleIntrinsicCategory::LibmMath,
+    { vmIntrinsics::_dlog10,
       CTRL_NONE,                          MEM_NONE,
       JeandleMemoryBarrierKind::None,     JeandleLoweringKind::RuntimeLeafCall,
       SUPPORT_HOTSPOT_STUB | SUPPORT_LLVM_INTRIN, nullptr },
-    { vmIntrinsics::_dexp,                JeandleIntrinsicCategory::LibmMath,
+    { vmIntrinsics::_dexp,
       CTRL_NONE,                          MEM_NONE,
       JeandleMemoryBarrierKind::None,     JeandleLoweringKind::RuntimeLeafCall,
       SUPPORT_HOTSPOT_STUB | SUPPORT_LLVM_INTRIN, nullptr },
-    { vmIntrinsics::_dpow,                JeandleIntrinsicCategory::LibmMath,
+    { vmIntrinsics::_dpow,
       CTRL_NONE,                          MEM_NONE,
       JeandleMemoryBarrierKind::None,     JeandleLoweringKind::GuardedHybrid,
       SUPPORT_HOTSPOT_STUB | SUPPORT_LLVM_INTRIN, nullptr },
 
     // System hints
-    { vmIntrinsics::_onSpinWait,          JeandleIntrinsicCategory::MacroSemantic,
+    { vmIntrinsics::_onSpinWait,
       CTRL_NONE,                          MEM_NONE,
-      JeandleMemoryBarrierKind::None,     JeandleLoweringKind::PureIRNode,
+      JeandleMemoryBarrierKind::None,     JeandleLoweringKind::PureLLVMBuiltin,
       SUPPORT_NONE,                       nullptr },
 
     // _blackhole: optimizer constraint — consume all arguments to prevent DCE, return void.
     // Uses volatile inline asm per argument so LLVM cannot eliminate the argument computations.
-    // MacroSemantic + PureIRNode: always supported, no deopt, no memory effects.
-    { vmIntrinsics::_blackhole,           JeandleIntrinsicCategory::MacroSemantic,
+    // PureLLVMBuiltin: always supported, no deopt, no memory effects.
+    { vmIntrinsics::_blackhole,
       CTRL_NONE,                          MEM_NONE,
-      JeandleMemoryBarrierKind::None,     JeandleLoweringKind::PureIRNode,
+      JeandleMemoryBarrierKind::None,     JeandleLoweringKind::PureLLVMBuiltin,
       SUPPORT_NONE,                       nullptr },
 
     // Preconditions.checkIndex(int index, int length, BiFunction exceptionFactory) -> int
@@ -188,18 +210,18 @@ class JeandleIntrinsicRegistryTable : public AllStatic {
     // C2 behaviour reference: library_call.cpp checks too_many_traps for both
     // Reason_intrinsic (length < 0) and Reason_range_check (index OOB); we
     // mirror the same site throttle via trap_throttle_mask.
-    { vmIntrinsics::_Preconditions_checkIndex, JeandleIntrinsicCategory::MacroSemantic,
+    { vmIntrinsics::_Preconditions_checkIndex,
       CTRL_MAY_DEOPT,                     MEM_NONE,
-      JeandleMemoryBarrierKind::None,     JeandleLoweringKind::PureIRNode,
+      JeandleMemoryBarrierKind::None,     JeandleLoweringKind::PureLLVMBuiltin,
       SUPPORT_NONE,                       nullptr,
       trap_reason_mask(Deoptimization::Reason_intrinsic) |
           trap_reason_mask(Deoptimization::Reason_range_check) },
 
     // Preconditions.checkIndex(long index, long length, BiFunction exceptionFactory) -> long
     // Identical trap semantics to the int variant; only the value width differs.
-    { vmIntrinsics::_Preconditions_checkLongIndex, JeandleIntrinsicCategory::MacroSemantic,
+    { vmIntrinsics::_Preconditions_checkLongIndex,
       CTRL_MAY_DEOPT,                     MEM_NONE,
-      JeandleMemoryBarrierKind::None,     JeandleLoweringKind::PureIRNode,
+      JeandleMemoryBarrierKind::None,     JeandleLoweringKind::PureLLVMBuiltin,
       SUPPORT_NONE,                       nullptr,
       trap_reason_mask(Deoptimization::Reason_intrinsic) |
           trap_reason_mask(Deoptimization::Reason_range_check) },
@@ -220,7 +242,7 @@ class JeandleIntrinsicRegistryTable : public AllStatic {
     //
     // Note: attach_deopt_bundle is still set unconditionally for JavaOpCall mode
     // (see make_plan); plan-level decision independent of CTRL_MAY_DEOPT.
-    { vmIntrinsics::_getClass,            JeandleIntrinsicCategory::TypeSemantic,
+    { vmIntrinsics::_getClass,
       CTRL_NONE,                          MEM_HAS_EFFECT | MEM_NEEDS_GC_STATE,
       JeandleMemoryBarrierKind::None,     JeandleLoweringKind::JavaOperation,
       SUPPORT_NONE,                       "jeandle.get_class" },
@@ -228,13 +250,13 @@ class JeandleIntrinsicRegistryTable : public AllStatic {
     // Reference.get(): returns the referent, applying a GC load barrier (WeakReferentLoad).
     // CTRL_NONE — no speculative guard; attach_deopt_bundle is plan-driven by
     // MEM_NEEDS_GC_STATE, not by deoptimization semantics.
-    { vmIntrinsics::_Reference_get,       JeandleIntrinsicCategory::MemorySemantic,
+    { vmIntrinsics::_Reference_get,
       CTRL_NONE,                          MEM_HAS_EFFECT | MEM_NEEDS_GC_STATE,
       JeandleMemoryBarrierKind::WeakReferentLoad, JeandleLoweringKind::JavaOperation,
       SUPPORT_NONE,                       "jeandle.reference_get" },
 
     // Reference.refersTo0(): raw referent pointer identity comparison (no GC barrier).
-    { vmIntrinsics::_Reference_refersTo0, JeandleIntrinsicCategory::MemorySemantic,
+    { vmIntrinsics::_Reference_refersTo0,
       CTRL_NONE,                          MEM_HAS_EFFECT | MEM_NEEDS_GC_STATE,
       JeandleMemoryBarrierKind::RawReferentRead, JeandleLoweringKind::JavaOperation,
       SUPPORT_NONE,                       "jeandle.reference_refers_to" },
@@ -242,22 +264,22 @@ class JeandleIntrinsicRegistryTable : public AllStatic {
     // Memory fences: lower to LLVM fence instructions (acquire / release / seq_cst).
     // MEM_HAS_EFFECT but no GC interaction; barrier_kind=None because the fence IR
     // instruction is the complete implementation — no GC pass augmentation needed.
-    { vmIntrinsics::_loadFence,           JeandleIntrinsicCategory::BarrierSemantic,
+    { vmIntrinsics::_loadFence,
       CTRL_NONE,                          MEM_HAS_EFFECT,
-      JeandleMemoryBarrierKind::None,     JeandleLoweringKind::PureIRNode,
+      JeandleMemoryBarrierKind::None,     JeandleLoweringKind::PureIRInstruction,
       SUPPORT_NONE,                       nullptr },
-    { vmIntrinsics::_storeFence,          JeandleIntrinsicCategory::BarrierSemantic,
+    { vmIntrinsics::_storeFence,
       CTRL_NONE,                          MEM_HAS_EFFECT,
-      JeandleMemoryBarrierKind::None,     JeandleLoweringKind::PureIRNode,
+      JeandleMemoryBarrierKind::None,     JeandleLoweringKind::PureIRInstruction,
       SUPPORT_NONE,                       nullptr },
-    { vmIntrinsics::_fullFence,           JeandleIntrinsicCategory::BarrierSemantic,
+    { vmIntrinsics::_fullFence,
       CTRL_NONE,                          MEM_HAS_EFFECT,
-      JeandleMemoryBarrierKind::None,     JeandleLoweringKind::PureIRNode,
+      JeandleMemoryBarrierKind::None,     JeandleLoweringKind::PureIRInstruction,
       SUPPORT_NONE,                       nullptr },
 
     // PhantomReference.refersTo0 shares semantics with Reference.refersTo0:
     // raw referent read (no GC barrier), pointer identity comparison.
-    { vmIntrinsics::_PhantomReference_refersTo0, JeandleIntrinsicCategory::MemorySemantic,
+    { vmIntrinsics::_PhantomReference_refersTo0,
       CTRL_NONE,                          MEM_HAS_EFFECT | MEM_NEEDS_GC_STATE,
       JeandleMemoryBarrierKind::RawReferentRead, JeandleLoweringKind::JavaOperation,
       SUPPORT_NONE,                       "jeandle.reference_refers_to" },
@@ -272,7 +294,7 @@ class JeandleIntrinsicRegistryTable : public AllStatic {
     //   IllegalArgumentException may be thrown by the runtime.
     // MEM_HAS_EFFECT only (not MEM_NEEDS_GC_STATE): the runtime call handles
     //   allocation-time GC interaction, no per-lowering barrier required.
-    { vmIntrinsics::_newArray,            JeandleIntrinsicCategory::AllocationSemantic,
+    { vmIntrinsics::_newArray,
       CTRL_NEEDS_EXCEPTION_EDGE,          MEM_HAS_EFFECT,
       JeandleMemoryBarrierKind::None,     JeandleLoweringKind::JavaOperation,
       SUPPORT_NONE,                       "jeandle.new_array" },
@@ -287,7 +309,7 @@ class JeandleIntrinsicRegistryTable : public AllStatic {
     // CTRL_MAY_DEOPT: precondition guards (null, off<0, len<0, off+len>length)
     //   emit uncommon_trap(Reason_intrinsic) which requires a deopt bundle so the
     //   interpreter can re-execute and throw IOOBE.
-    { vmIntrinsics::_countPositives,      JeandleIntrinsicCategory::ArrayScan,
+    { vmIntrinsics::_countPositives,
       CTRL_MAY_DEOPT,                     MEM_HAS_EFFECT,
       JeandleMemoryBarrierKind::None,     JeandleLoweringKind::RuntimeLeafCall,
       SUPPORT_HOTSPOT_STUB,               nullptr,

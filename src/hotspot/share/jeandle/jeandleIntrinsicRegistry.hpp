@@ -23,21 +23,6 @@
 
 class ciMethod;
 
-// High-level semantic family used as the first lowering dispatch key.  Entries
-// in the same category share a lowering shape; individual IDs are still handled
-// by the category-specific lowering code.
-enum class JeandleIntrinsicCategory {
-  PureMath,            // arithmetic lowered to LLVM IR/builtins
-  LibmMath,            // math calls that may use libm/HotSpot stubs
-  TypeCoercion,        // bit-level reinterpretation between primitive types (bitcast)
-  MemorySemantic,      // heap/reference operations with GC-visible semantics
-  TypeSemantic,        // type/reflection operations
-  AllocationSemantic,  // allocation operations that may throw
-  BarrierSemantic,     // memory ordering and GC barrier semantics
-  MacroSemantic,       // VM/compiler pseudo-intrinsics such as blackhole
-  ArrayScan            // byte-array scan intrinsics (countPositives, etc.)
-};
-
 // Control-flow facts about an intrinsic.  Combined into descriptor.control_flags
 // with bitwise OR.  Intentionally an unscoped enum so descriptors can write
 // `CTRL_MAY_DEOPT | CTRL_NEEDS_EXCEPTION_EDGE` without operator overloads, and
@@ -83,10 +68,12 @@ enum class JeandleMemoryBarrierKind {
 };
 
 enum class JeandleLoweringKind {
-  PureIRNode,      // lower directly to LLVM IR nodes without a call boundary
-  RuntimeLeafCall, // emit a runtime/stub call that does not safepoint or throw
-  GuardedHybrid,   // choose between IR/builtin and runtime paths by capability
-  JavaOperation    // delegate complex semantics to a JavaOp runtime glue method
+  PureIRInstruction, // lower to a bare LLVM IR instruction (bitcast, fence)
+  PureLLVMBuiltin,   // lower to a named llvm.* builtin or LLVM target intrinsic
+  RuntimeLeafCall,   // emit a runtime/stub call that does not safepoint or throw
+  GuardedHybrid,     // policy-identical to RuntimeLeafCall; the lowering function
+                     // body additionally emits a fast/slow guard (e.g. pow(x,2))
+  JavaOperation      // delegate complex semantics to a JavaOp runtime glue method
 };
 
 using JeandleTrapReasonMask = uint32_t;
@@ -96,8 +83,6 @@ static_assert(Deoptimization::Reason_LIMIT <= 32,
 struct JeandleIntrinsicDescriptor {
   // VM intrinsic ID being described.  This is also the O(1) lookup-table key.
   vmIntrinsics::ID id;
-  // High-level semantic family selected as the first lowering dispatch key.
-  JeandleIntrinsicCategory category;
   // Bitmask of JeandleControlFlag.
   uint8_t control_flags;
   // Bitmask of JeandleMemoryFlag.

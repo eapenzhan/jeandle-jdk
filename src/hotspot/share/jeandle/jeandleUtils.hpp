@@ -59,9 +59,9 @@ bool is_effectively_final(Klass* klass);
 // No-op when ret_type is primitive, when the klass is unloaded, or when the
 // klass is an unverified interface — same exemption rules as the regular
 // invoke() path uses.
-void maybe_attach_java_klass_ret_attr(llvm::CallBase* call,
-                                      ciType* ret_type,
-                                      llvm::LLVMContext& ctx);
+void attach_java_klass_ret_attr(llvm::CallBase* call,
+                                ciType* ret_type,
+                                llvm::LLVMContext& ctx);
 
 void apply_vm_flag_feature_overrides(llvm::SubtargetFeatures& features);
 

@@ -82,9 +82,9 @@ bool is_effectively_final(Klass* klass) {
   return false;
 }
 
-void maybe_attach_java_klass_ret_attr(llvm::CallBase* call,
-                                      ciType* ret_type,
-                                      llvm::LLVMContext& ctx) {
+void attach_java_klass_ret_attr(llvm::CallBase* call,
+                                ciType* ret_type,
+                                llvm::LLVMContext& ctx) {
   if (!ret_type->is_klass()) {
     return;
   }

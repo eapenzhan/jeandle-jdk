@@ -44,6 +44,8 @@
 #include "ci/ciTypeFlow.hpp"
 #include "oops/objArrayKlass.hpp"
 #include "classfile/javaClasses.hpp"
+#include "compiler/compilerDirectives.hpp"
+#include "compiler/compileTask.hpp"
 #include "gc/shared/gc_globals.hpp"
 #include "interpreter/interpreter.hpp"
 #include "logging/log.hpp"
@@ -1891,7 +1893,7 @@ void JeandleAbstractInterpreter::invoke() {
   invoke->addFnAttr(patch_bytes_attr);
 
   // Attach java-klass return type attribute to the call site.
-  maybe_attach_java_klass_ret_attr(invoke, method_signature->return_type(), *_context);
+  attach_java_klass_ret_attr(invoke, method_signature->return_type(), *_context);
 
   if (return_type != BasicType::T_VOID) {
     _jvm->push(return_type, invoke);
@@ -1904,12 +1906,23 @@ bool JeandleAbstractInterpreter::try_lower_intrinsic(const ciMethod* target) {
     return false;
   }
 
-  // Honour HotSpot's standard -XX:DisableIntrinsic=<list> / -XX:ControlIntrinsic
-  // flags. When the id is disabled the caller falls back to a normal invoke,
-  // matching the behaviour of C1/C2 and giving Jeandle a deterministic way to
-  // run baseline comparisons against the intrinsic-lowered path.
+  // Availability check. Jeandle has no AbstractCompiler hierarchy, so the three
+  // checks C2 folds into AbstractCompiler::is_intrinsic_available are spread out:
+  //   - the per-compiler allowlist is the registry lookup above (lookup == nullptr
+  //     means "not an intrinsic Jeandle knows how to lower");
+  //   - global -XX:DisableIntrinsic / -XX:ControlIntrinsic via is_disabled_by_flags;
+  //   - per-method -XX:CompileCommand=option,...,DisableIntrinsic,... via the
+  //     compilation's DirectiveSet.
+  // When the id is disabled the caller falls back to a normal invoke.
   if (vmIntrinsics::is_disabled_by_flags(desc->id)) {
     return false;
+  }
+  if (CompileTask* task = ciEnv::current()->task()) {
+    if (DirectiveSet* directive = task->directive()) {
+      if (directive->is_intrinsic_disabled(desc->id)) {
+        return false;
+      }
+    }
   }
 
   JeandleIntrinsicPolicy policy;
