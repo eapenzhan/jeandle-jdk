@@ -51,8 +51,6 @@ class JeandleIntrinsicLowering : public StackObj {
                                   const JeandleIntrinsicDecision& decision);
   bool lower_barrier_semantic(const JeandleIntrinsicDescriptor& desc,
                               const JeandleIntrinsicDecision& decision);
-  bool lower_macro_semantic(const JeandleIntrinsicDescriptor& desc,
-                            const JeandleIntrinsicDecision& decision);
   bool lower_preconditions_check_index(const JeandleIntrinsicDescriptor& desc,
                                        const JeandleIntrinsicDecision& decision);
   bool lower_count_positives(const JeandleIntrinsicDescriptor& desc,
@@ -65,20 +63,26 @@ class JeandleIntrinsicLowering : public StackObj {
   // Implemented in cpu/<arch>/jeandleIntrinsicLowering_<arch>.cpp.
   bool lower_spin_wait_hint(const JeandleIntrinsicDescriptor& desc,
                             const JeandleIntrinsicDecision& decision);
-  llvm::CallInst* emit_runtime_call(const JeandleIntrinsicDescriptor& desc,
+  // Shared call-site skeleton for runtime stubs and JavaOps: builds the deopt
+  // bundle, emits a call or an invoke (call path marked nounwind) based on
+  // decision.ir_plan.needs_exception_edge, then runs the common IR annotations.
+  // entry is optional runtime-stub metadata (nullptr for JavaOps).
+  llvm::CallBase* emit_callsite(const JeandleIntrinsicDescriptor& desc,
+                                const JeandleIntrinsicDecision& decision,
+                                llvm::FunctionCallee callee,
+                                llvm::CallingConv::ID calling_conv,
+                                llvm::ArrayRef<llvm::Value*> args,
+                                const JeandleIntrinsicEntrypoint* entry = nullptr);
+  // Runtime-stub call site. Thin facade over emit_callsite.
+  llvm::CallBase* emit_runtime_call(const JeandleIntrinsicDescriptor& desc,
                                     const JeandleIntrinsicDecision& decision,
                                     const JeandleIntrinsicEntrypoint& entry,
                                     llvm::ArrayRef<llvm::Value*> args);
-  llvm::InvokeInst* emit_runtime_invoke(const JeandleIntrinsicDescriptor& desc,
-                                        const JeandleIntrinsicDecision& decision,
-                                        const JeandleIntrinsicEntrypoint& entry,
-                                        llvm::ArrayRef<llvm::Value*> args);
-  llvm::CallInst* emit_java_op_call(const JeandleIntrinsicDescriptor& desc,
+  // JavaOp call site. Thin facade over emit_callsite; additionally tags the site
+  // with the "jeandle.java_op" attribute.
+  llvm::CallBase* emit_java_op_call(const JeandleIntrinsicDescriptor& desc,
                                     const JeandleIntrinsicDecision& decision,
                                     llvm::ArrayRef<llvm::Value*> args);
-  llvm::InvokeInst* emit_java_op_invoke(const JeandleIntrinsicDescriptor& desc,
-                                        const JeandleIntrinsicDecision& decision,
-                                        llvm::ArrayRef<llvm::Value*> args);
   void annotate_generated_instruction(llvm::Instruction& inst,
                                       const JeandleIntrinsicDescriptor& desc,
                                       const JeandleIntrinsicDecision& decision,

@@ -87,54 +87,47 @@ void JeandleIntrinsicLowering::attach_callee_return_klass_attr(llvm::CallBase* c
                                    *_interp->_context);
 }
 
-llvm::CallInst* JeandleIntrinsicLowering::emit_runtime_call(const JeandleIntrinsicDescriptor& desc,
+llvm::CallBase* JeandleIntrinsicLowering::emit_callsite(const JeandleIntrinsicDescriptor& desc,
+                                                        const JeandleIntrinsicDecision& decision,
+                                                        llvm::FunctionCallee callee,
+                                                        llvm::CallingConv::ID calling_conv,
+                                                        llvm::ArrayRef<llvm::Value*> args,
+                                                        const JeandleIntrinsicEntrypoint* entry) {
+  llvm::SmallVector<llvm::OperandBundleDef, 1> bundles =
+    JeandleIntrinsicIRSemantics::build_operand_bundles(_interp, decision.ir_plan);
+  llvm::CallBase* site;
+  if (decision.ir_plan.needs_exception_edge) {
+    site = _interp->create_call_ex(callee, args, calling_conv, bundles);
+  } else {
+    // Plain call: lowering chose this path because the intrinsic raises no Java
+    // exception. Mark the site nounwind so LLVM does not conservatively treat it
+    // as a potential unwind point (the callee body is opaque here, so nounwind
+    // cannot be inferred).
+    site = _interp->create_call(callee, args, calling_conv, bundles);
+    site->setDoesNotThrow();
+  }
+  annotate_generated_instruction(*site, desc, decision, entry);
+  attach_callee_return_klass_attr(site);
+  return site;
+}
+
+llvm::CallBase* JeandleIntrinsicLowering::emit_runtime_call(const JeandleIntrinsicDescriptor& desc,
                                                             const JeandleIntrinsicDecision& decision,
                                                             const JeandleIntrinsicEntrypoint& entry,
                                                             llvm::ArrayRef<llvm::Value*> args) {
-  llvm::SmallVector<llvm::OperandBundleDef, 1> bundles =
-    JeandleIntrinsicIRSemantics::build_operand_bundles(_interp, decision.ir_plan);
-  llvm::CallInst* call = _interp->create_call(entry.callee, args, entry.calling_conv, bundles);
-  annotate_generated_instruction(*call, desc, decision, &entry);
-  attach_callee_return_klass_attr(call);
-  return call;
+  return emit_callsite(desc, decision, entry.callee, entry.calling_conv, args, &entry);
 }
 
-llvm::InvokeInst* JeandleIntrinsicLowering::emit_runtime_invoke(const JeandleIntrinsicDescriptor& desc,
-                                                                const JeandleIntrinsicDecision& decision,
-                                                                const JeandleIntrinsicEntrypoint& entry,
-                                                                llvm::ArrayRef<llvm::Value*> args) {
-  llvm::SmallVector<llvm::OperandBundleDef, 1> bundles =
-    JeandleIntrinsicIRSemantics::build_operand_bundles(_interp, decision.ir_plan);
-  llvm::InvokeInst* invoke = _interp->create_call_ex(entry.callee, args, entry.calling_conv, bundles);
-  annotate_generated_instruction(*invoke, desc, decision, &entry);
-  attach_callee_return_klass_attr(invoke);
-  return invoke;
-}
-
-llvm::CallInst* JeandleIntrinsicLowering::emit_java_op_call(const JeandleIntrinsicDescriptor& desc,
+llvm::CallBase* JeandleIntrinsicLowering::emit_java_op_call(const JeandleIntrinsicDescriptor& desc,
                                                             const JeandleIntrinsicDecision& decision,
                                                             llvm::ArrayRef<llvm::Value*> args) {
   assert(desc.java_op_name != nullptr, "JavaOp lowering requires a JavaOp symbol");
-  llvm::SmallVector<llvm::OperandBundleDef, 1> bundles =
-    JeandleIntrinsicIRSemantics::build_operand_bundles(_interp, decision.ir_plan);
-  llvm::CallInst* call = _interp->call_java_op(desc.java_op_name, args, bundles);
-  annotate_generated_instruction(*call, desc, decision);
-  add_string_attr(*call, "jeandle.java_op", desc.java_op_name);
-  attach_callee_return_klass_attr(call);
-  return call;
-}
-
-llvm::InvokeInst* JeandleIntrinsicLowering::emit_java_op_invoke(const JeandleIntrinsicDescriptor& desc,
-                                                                const JeandleIntrinsicDecision& decision,
-                                                                llvm::ArrayRef<llvm::Value*> args) {
-  assert(desc.java_op_name != nullptr, "JavaOp lowering requires a JavaOp symbol");
-  llvm::SmallVector<llvm::OperandBundleDef, 1> bundles =
-    JeandleIntrinsicIRSemantics::build_operand_bundles(_interp, decision.ir_plan);
-  llvm::InvokeInst* invoke = _interp->call_java_op_ex(desc.java_op_name, args, bundles);
-  annotate_generated_instruction(*invoke, desc, decision);
-  add_string_attr(*invoke, "jeandle.java_op", desc.java_op_name);
-  attach_callee_return_klass_attr(invoke);
-  return invoke;
+  llvm::Function* java_op = _interp->_module.getFunction(desc.java_op_name);
+  assert(java_op != nullptr, "invalid JavaOp");
+  llvm::CallBase* site = emit_callsite(desc, decision, java_op,
+                                       llvm::CallingConv::Hotspot_JIT, args);
+  add_string_attr(*site, "jeandle.java_op", desc.java_op_name);
+  return site;
 }
 
 bool JeandleIntrinsicLowering::lower(const JeandleIntrinsicDescriptor& desc,
@@ -182,10 +175,14 @@ bool JeandleIntrinsicLowering::lower(const JeandleIntrinsicDescriptor& desc,
       return lower_barrier_semantic(desc, decision);
 
     case vmIntrinsics::_onSpinWait:
-    case vmIntrinsics::_blackhole:
+      return lower_spin_wait_hint(desc, decision);
+
     case vmIntrinsics::_Preconditions_checkIndex:
     case vmIntrinsics::_Preconditions_checkLongIndex:
-      return lower_macro_semantic(desc, decision);
+      return lower_preconditions_check_index(desc, decision);
+
+    case vmIntrinsics::_blackhole:
+      return lower_blackhole(desc, decision);
 
     case vmIntrinsics::_getClass:
       return lower_get_class(desc, decision);
@@ -350,11 +347,7 @@ bool JeandleIntrinsicLowering::lower_libm_math(const JeandleIntrinsicDescriptor&
     return false;
   }
   llvm::Value* arg = _interp->_jvm->dpop();
-  if (decision.ir_plan.needs_exception_edge) {
-    _interp->_jvm->dpush(emit_runtime_invoke(desc, decision, entry, {arg}));
-  } else {
-    _interp->_jvm->dpush(emit_runtime_call(desc, decision, entry, {arg}));
-  }
+  _interp->_jvm->dpush(emit_runtime_call(desc, decision, entry, {arg}));
   return true;
 }
 
@@ -440,37 +433,21 @@ bool JeandleIntrinsicLowering::lower_pow_hybrid(const JeandleIntrinsicDescriptor
   if (!JeandleIntrinsicEntrypoints::resolve_math(vmIntrinsics::_dpow, decision.impl_kind, _interp->_module, entry)) {
     return false;
   }
-  if (decision.ir_plan.needs_exception_edge) {
-    _interp->_jvm->dpush(emit_runtime_invoke(desc, decision, entry, {base, exp}));
-  } else {
-    _interp->_jvm->dpush(emit_runtime_call(desc, decision, entry, {base, exp}));
-  }
+  _interp->_jvm->dpush(emit_runtime_call(desc, decision, entry, {base, exp}));
   return true;
 }
 
 bool JeandleIntrinsicLowering::lower_get_class(const JeandleIntrinsicDescriptor& desc,
                                                const JeandleIntrinsicDecision& decision) {
   llvm::Value* obj = _interp->_jvm->apop();
-  llvm::CallBase* result = nullptr;
-  if (decision.ir_plan.needs_exception_edge) {
-    result = emit_java_op_invoke(desc, decision, {obj});
-  } else {
-    result = emit_java_op_call(desc, decision, {obj});
-  }
-  _interp->_jvm->apush(result);
+  _interp->_jvm->apush(emit_java_op_call(desc, decision, {obj}));
   return true;
 }
 
 bool JeandleIntrinsicLowering::lower_reference_get(const JeandleIntrinsicDescriptor& desc,
                                                    const JeandleIntrinsicDecision& decision) {
   llvm::Value* reference = _interp->_jvm->apop();
-  llvm::CallBase* result = nullptr;
-  if (decision.ir_plan.needs_exception_edge) {
-    result = emit_java_op_invoke(desc, decision, {reference});
-  } else {
-    result = emit_java_op_call(desc, decision, {reference});
-  }
-  _interp->_jvm->apush(result);
+  _interp->_jvm->apush(emit_java_op_call(desc, decision, {reference}));
   return true;
 }
 
@@ -488,21 +465,6 @@ bool JeandleIntrinsicLowering::lower_barrier_semantic(const JeandleIntrinsicDesc
   llvm::FenceInst* fence = builder.CreateFence(ordering);
   annotate_generated_instruction(*fence, desc, decision);
   return true;
-}
-
-bool JeandleIntrinsicLowering::lower_macro_semantic(const JeandleIntrinsicDescriptor& desc,
-                                                    const JeandleIntrinsicDecision& decision) {
-  switch (desc.id) {
-    case vmIntrinsics::_onSpinWait:
-      return lower_spin_wait_hint(desc, decision);
-    case vmIntrinsics::_Preconditions_checkIndex:
-    case vmIntrinsics::_Preconditions_checkLongIndex:
-      return lower_preconditions_check_index(desc, decision);
-    case vmIntrinsics::_blackhole:
-      return lower_blackhole(desc, decision);
-    default:
-      return false;
-  }
 }
 
 // Preconditions.checkIndex(int|long index, int|long length, BiFunction exceptionFactory)
@@ -644,14 +606,8 @@ bool JeandleIntrinsicLowering::lower_reference_refers_to(const JeandleIntrinsicD
   // Stack order: ..., reference (this), obj — pop in reverse
   llvm::Value* obj = _interp->_jvm->apop();
   llvm::Value* reference = _interp->_jvm->apop();
-  llvm::CallBase* result = nullptr;
-  if (decision.ir_plan.needs_exception_edge) {
-    result = emit_java_op_invoke(desc, decision, {reference, obj});
-  } else {
-    result = emit_java_op_call(desc, decision, {reference, obj});
-  }
   // JavaOp returns i32 (JVM boolean convention); push as int
-  _interp->_jvm->ipush(result);
+  _interp->_jvm->ipush(emit_java_op_call(desc, decision, {reference, obj}));
   return true;
 }
 
@@ -699,8 +655,7 @@ bool JeandleIntrinsicLowering::lower_count_positives(
   if (!JeandleIntrinsicEntrypoints::resolve_count_positives(_interp->_module, entry)) {
     return false;
   }
-  llvm::CallInst* result = emit_runtime_call(desc, decision, entry, {ba_start, len});
-  _interp->_jvm->ipush(result);
+  _interp->_jvm->ipush(emit_runtime_call(desc, decision, entry, {ba_start, len}));
   return true;
 }
 
@@ -772,18 +727,12 @@ bool JeandleIntrinsicLowering::lower_blackhole(const JeandleIntrinsicDescriptor&
 //      which invokes Reflection::reflect_new_array — handles klass resolution, primitive
 //      types, dimension limits, NegativeArraySizeException, NullPointerException.
 //
-// uses emit_java_op_invoke when needs_exception_edge is set (exceptions may propagate).
+// emit_java_op_call internally emits an invoke when needs_exception_edge is set,
+// so exceptions propagate to the bytecode-level handler.
 bool JeandleIntrinsicLowering::lower_new_array(const JeandleIntrinsicDescriptor& desc,
                                                const JeandleIntrinsicDecision& decision) {
   llvm::Value* length = _interp->_jvm->ipop();
   llvm::Value* mirror = _interp->_jvm->apop();
-
-  llvm::CallBase* result;
-  if (decision.ir_plan.needs_exception_edge) {
-    result = emit_java_op_invoke(desc, decision, {mirror, length});
-  } else {
-    result = emit_java_op_call(desc, decision, {mirror, length});
-  }
-  _interp->_jvm->apush(result);
+  _interp->_jvm->apush(emit_java_op_call(desc, decision, {mirror, length}));
   return true;
 }

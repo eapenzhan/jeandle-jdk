@@ -50,7 +50,11 @@ static JeandleIRSemanticPlan make_plan(const JeandleIntrinsicDescriptor& desc,
 
   // attach_deopt_bundle is required when:
   //   - the intrinsic itself can deopt;
-  //   - the call site is GC-sensitive (RewriteStatepointsForGC needs interpreter state);
+  //   - the call site can safepoint: every safepoint is a potential deopt point,
+  //     so it must carry interpreter state. RewriteStatepointsForGC does not need
+  //     that state for its own work (GC root relocation); it merely threads the
+  //     "deopt" bundle into the gc.statepoint's deopt section for HotSpot to use
+  //     at runtime if the safepoint deopts.
   //   - the call crosses a managed-runtime boundary (call or invoke);
   //   - the call is a JavaOp (conservatively non-leaf until JavaOp infrastructure can
   //     derive precise bundle requirements).

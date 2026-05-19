@@ -52,8 +52,10 @@ struct JeandleIntrinsicEntrypoint;
 //   1. Behavioural contracts consumed by LLVM passes today.
 //      - The "gc-leaf-function" function attribute is read by
 //        RewriteStatepointsForGC to skip statepoint insertion on leaf calls.
-//      - The "deopt" operand bundle (built by build_operand_bundles) feeds the
-//        same pass with the interpreter state needed to materialise deopts.
+//      - The "deopt" operand bundle (built by build_operand_bundles) carries the
+//        interpreter state for a potential deopt at the call's safepoint.
+//        RewriteStatepointsForGC threads it into the gc.statepoint's deopt
+//        section; HotSpot consumes it at runtime only if the safepoint deopts.
 //
 //   2. Observability labels reserved as a forward contract for GC-aware /
 //      barrier-aware LLVM passes that have not yet been written:

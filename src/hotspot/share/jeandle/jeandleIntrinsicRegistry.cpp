@@ -25,23 +25,61 @@
 // =============================================================================
 // How to add a new intrinsic to Jeandle
 // -----------------------------------------------------------------------------
-// 1. Add a JeandleIntrinsicDescriptor entry to _intrinsic_table below: pick the
-//    control/memory flags, barrier_kind, lowering_kind, support_flags and (for
-//    JavaOperation) java_op_name. The table is the single source of static
-//    semantics for the intrinsic.
-// 2. jeandleIntrinsicSupport.cpp — if the intrinsic has a HotSpot stub or a
-//    SharedRuntime fallback, add a probe so JeandleIntrinsicCapabilities reports
-//    has_hotspot_stub / has_shared_runtime correctly. Pure IR / pure JavaOp
-//    intrinsics need no change here.
-// 3. jeandleIntrinsicPolicy.cpp — usually no change; decide() already handles
-//    every JeandleLoweringKind. Only touch it for a genuinely new strategy.
-// 4. jeandleIntrinsicLowering.cpp — add a `case vmIntrinsics::_yourId:` to
-//    lower() routing to a lower_* helper, and implement that helper. Prefer the
-//    shared emit helpers (emit_runtime_call / emit_java_op_call / ...).
-// 5. For JavaOperation intrinsics, define the JavaOp in templatemodule/
-//    template.ll or jeandleRuntimeDefinedJavaOps.cpp.
-// See jeandle-docs/intrinsics/intrinsic-framework.md ("Adding a New Intrinsic")
-// for the full step-by-step contract, pitfalls, and worked examples.
+// The framework has four touch points: descriptor (this file), support, policy,
+// and lowering. A new intrinsic almost always touches descriptor + lowering and
+// sometimes support; policy is rarely changed.
+//
+// 1. Pick a JeandleLoweringKind that fits the intrinsic's shape:
+//      PureIRInstruction — bare LLVM IR (bitcast, fence). No runtime path.
+//      PureLLVMBuiltin   — named llvm.* builtin or target intrinsic (sqrt, abs,
+//                          ctpop). No runtime path.
+//      RuntimeLeafCall   — straight call into a HotSpot stub or SharedRuntime
+//                          entry; no Java-level side effects beyond return.
+//      GuardedHybrid     — runtime path is preferred when available but the
+//                          lower_* helper itself emits a fast/slow guard
+//                          (e.g. lower_pow_hybrid).
+//      JavaOperation     — call into a Jeandle-defined JavaOp; supply
+//                          java_op_name. Use this for intrinsics that need
+//                          full IR-level semantics (GC barriers, type checks).
+//
+// 2. Add a JeandleIntrinsicDescriptor entry to _intrinsic_table below.
+//    Field guide (see JeandleIntrinsicDescriptor for full definitions):
+//      id              — vmIntrinsics::_xxx, must satisfy vmIntrinsics::is_valid_id
+//      lowering_kind   — one of the kinds above
+//      support_flags   — bitmask of SUPPORT_LLVM_INTRIN / SUPPORT_HOTSPOT_STUB
+//                        / SUPPORT_SHARED_RUNTIME; declares which runtime paths
+//                        the intrinsic *can* use. The actual presence at
+//                        runtime is decided by JeandleIntrinsicSupport::query.
+//      barrier_kind    — declares memory ordering for fences and atomics.
+//      needs_gc_state  — true if the call may observe heap state during a GC
+//                        (forces statepoint bundle attachment).
+//      may_deopt       — true if the lowering may emit uncommon_trap.
+//      needs_exception_edge — true if the call can throw a Java exception and
+//                        must be lowered as `invoke`.
+//      trap_throttle_mask — bitmask of Deoptimization::DeoptReason values that
+//                        cause the intrinsic to be marked Unsupported when the
+//                        caller has hit too_many_traps at this bci.
+//      java_op_name    — required iff lowering_kind == JavaOperation.
+//
+// 3. jeandleIntrinsicSupport.cpp — add a probe for the HotSpot stub or
+//    SharedRuntime entry if support_flags advertises one. Pure IR and pure
+//    JavaOp intrinsics need no change here.
+//
+// 4. jeandleIntrinsicPolicy.cpp — usually no change. decide() already handles
+//    every JeandleLoweringKind. Only touch it if you introduce a new strategy.
+//
+// 5. jeandleIntrinsicLowering.cpp — add `case vmIntrinsics::_yourId:` to lower()
+//    routing to an existing lower_* helper (when the body shape is already
+//    covered) or write a new leaf handler. Reuse the shared emit helpers
+//    (emit_runtime_call / emit_runtime_invoke / emit_java_op_call /
+//    emit_java_op_invoke / annotate_generated_instruction) where possible.
+//
+// 6. For JavaOperation intrinsics: define the JavaOp body in either
+//    templatemodule/template.ll or jeandleRuntimeDefinedJavaOps.cpp.
+//
+// 7. Add a jtreg test under test/hotspot/jtreg/compiler/jeandle/. The
+//    `jeandle.lowering.mode` metadata attached by annotate_generated_instruction
+//    is a stable hook for IR-level assertions.
 // =============================================================================
 
 static constexpr JeandleTrapReasonMask trap_reason_mask(Deoptimization::DeoptReason reason) {
