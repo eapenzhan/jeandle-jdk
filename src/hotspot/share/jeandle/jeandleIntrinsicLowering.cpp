@@ -205,118 +205,123 @@ bool JeandleIntrinsicLowering::lower(const JeandleIntrinsicDescriptor& desc,
   }
 }
 
+// Pop one operand off the JVM stack picking the right typed pop. Used by the
+// table-driven lowering helpers below where the type is data, not code.
+// Takes JeandleVMState* directly so the helper itself does not need friend
+// access to JeandleAbstractInterpreter's private _jvm.
+static llvm::Value* pop_by_type(JeandleVMState* jvm, BasicType bt) {
+  switch (bt) {
+    case T_INT:    return jvm->ipop();
+    case T_LONG:   return jvm->lpop();
+    case T_FLOAT:  return jvm->fpop();
+    case T_DOUBLE: return jvm->dpop();
+    default: ShouldNotReachHere(); return nullptr;
+  }
+}
+
+// Push a value back onto the JVM stack picking the right typed push.
+static void push_by_type(JeandleVMState* jvm, BasicType bt, llvm::Value* v) {
+  switch (bt) {
+    case T_INT:    jvm->ipush(v); break;
+    case T_LONG:   jvm->lpush(v); break;
+    case T_FLOAT:  jvm->fpush(v); break;
+    case T_DOUBLE: jvm->dpush(v); break;
+    default: ShouldNotReachHere();
+  }
+}
+
+// Spec rows for lower_pure_math: every PureMath intrinsic boils down to
+// CreateIntrinsic(<type>, <llvm intrinsic>, <pop>[, poison flag]) + push.
+// Adding a new pure-math intrinsic = adding one row here, no code.
+//
+// result_type may differ from operand_type (e.g. Long.bitCount: ctpop on i64,
+// result is i32) — that asymmetry alone signals "trunc the result", no extra
+// flag needed.
+struct PureMathSpec {
+  vmIntrinsics::ID    vm_id;
+  llvm::Intrinsic::ID llvm_id;
+  BasicType           operand_type;
+  BasicType           result_type;
+  bool                needs_poison_flag;  // llvm.abs requires a trailing i1
+};
+
+static constexpr PureMathSpec kPureMathTable[] = {
+  { vmIntrinsics::_dabs,         llvm::Intrinsic::fabs,  T_DOUBLE, T_DOUBLE, false },
+  { vmIntrinsics::_fabs,         llvm::Intrinsic::fabs,  T_FLOAT,  T_FLOAT,  false },
+  { vmIntrinsics::_iabs,         llvm::Intrinsic::abs,   T_INT,    T_INT,    true  },
+  { vmIntrinsics::_labs,         llvm::Intrinsic::abs,   T_LONG,   T_LONG,   true  },
+  { vmIntrinsics::_bitCount_i,   llvm::Intrinsic::ctpop, T_INT,    T_INT,    false },
+  { vmIntrinsics::_bitCount_l,   llvm::Intrinsic::ctpop, T_LONG,   T_INT,    false },
+  { vmIntrinsics::_dsqrt,        llvm::Intrinsic::sqrt,  T_DOUBLE, T_DOUBLE, false },
+  { vmIntrinsics::_dsqrt_strict, llvm::Intrinsic::sqrt,  T_DOUBLE, T_DOUBLE, false },
+  // Rounding intrinsics: GuardedHybrid, impl_kind resolved to LLVMBuiltinCall
+  // by policy after JeandleIntrinsicSupport::query() confirmed CPU feature availability.
+  { vmIntrinsics::_floor,        llvm::Intrinsic::floor, T_DOUBLE, T_DOUBLE, false },
+  { vmIntrinsics::_ceil,         llvm::Intrinsic::ceil,  T_DOUBLE, T_DOUBLE, false },
+  { vmIntrinsics::_rint,         llvm::Intrinsic::rint,  T_DOUBLE, T_DOUBLE, false },
+};
+
+// Spec rows for lower_type_coercion: every Float/Int and Double/Long Raw-bits
+// intrinsic is a single bitcast between two scalar types.
+struct TypeCoercionSpec {
+  vmIntrinsics::ID vm_id;
+  BasicType        src_type;
+  BasicType        dst_type;
+};
+
+static constexpr TypeCoercionSpec kTypeCoercionTable[] = {
+  { vmIntrinsics::_floatToRawIntBits,   T_FLOAT,  T_INT    },
+  { vmIntrinsics::_intBitsToFloat,      T_INT,    T_FLOAT  },
+  { vmIntrinsics::_doubleToRawLongBits, T_DOUBLE, T_LONG   },
+  { vmIntrinsics::_longBitsToDouble,    T_LONG,   T_DOUBLE },
+};
+
 bool JeandleIntrinsicLowering::lower_pure_math(const JeandleIntrinsicDescriptor& desc,
                                                const JeandleIntrinsicDecision& decision) {
-  llvm::LLVMContext& ctx = *_interp->_context;
-  llvm::IRBuilder<>& builder = _interp->_ir_builder;
-  llvm::CallInst* call = nullptr;
-  switch (desc.id) {
-    case vmIntrinsics::_dabs:
-      call = builder.CreateIntrinsic(JeandleType::java2llvm(T_DOUBLE, ctx), llvm::Intrinsic::fabs,
-                                     {_interp->_jvm->dpop()});
-      annotate_generated_instruction(*call, desc, decision);
-      _interp->_jvm->dpush(call);
-      return true;
-    case vmIntrinsics::_fabs:
-      call = builder.CreateIntrinsic(JeandleType::java2llvm(T_FLOAT, ctx), llvm::Intrinsic::fabs,
-                                     {_interp->_jvm->fpop()});
-      annotate_generated_instruction(*call, desc, decision);
-      _interp->_jvm->fpush(call);
-      return true;
-    case vmIntrinsics::_iabs:
-      call = builder.CreateIntrinsic(JeandleType::java2llvm(T_INT, ctx), llvm::Intrinsic::abs,
-                                     {_interp->_jvm->ipop(), builder.getInt1(false)});
-      annotate_generated_instruction(*call, desc, decision);
-      _interp->_jvm->ipush(call);
-      return true;
-    case vmIntrinsics::_labs:
-      call = builder.CreateIntrinsic(JeandleType::java2llvm(T_LONG, ctx), llvm::Intrinsic::abs,
-                                     {_interp->_jvm->lpop(), builder.getInt1(false)});
-      annotate_generated_instruction(*call, desc, decision);
-      _interp->_jvm->lpush(call);
-      return true;
-    case vmIntrinsics::_bitCount_i:
-      call = builder.CreateIntrinsic(JeandleType::java2llvm(T_INT, ctx), llvm::Intrinsic::ctpop,
-                                     {_interp->_jvm->ipop()});
-      annotate_generated_instruction(*call, desc, decision);
-      _interp->_jvm->ipush(call);
-      return true;
-    case vmIntrinsics::_bitCount_l:
-      call = builder.CreateIntrinsic(JeandleType::java2llvm(T_LONG, ctx), llvm::Intrinsic::ctpop,
-                                     {_interp->_jvm->lpop()});
-      annotate_generated_instruction(*call, desc, decision);
-      // Long.bitCount(long) returns int — ctpop gives i64, trunc to i32 before pushing
-      _interp->_jvm->ipush(builder.CreateTrunc(call, JeandleType::java2llvm(T_INT, ctx)));
-      return true;
-    case vmIntrinsics::_dsqrt:
-    case vmIntrinsics::_dsqrt_strict:
-      call = builder.CreateIntrinsic(JeandleType::java2llvm(T_DOUBLE, ctx), llvm::Intrinsic::sqrt,
-                                     {_interp->_jvm->dpop()});
-      annotate_generated_instruction(*call, desc, decision);
-      _interp->_jvm->dpush(call);
-      return true;
-    // Rounding intrinsics: GuardedHybrid, impl_kind resolved to LLVMBuiltinCall
-    // by policy after JeandleIntrinsicSupport::query() confirmed CPU feature availability.
-    case vmIntrinsics::_floor:
-      call = builder.CreateIntrinsic(JeandleType::java2llvm(T_DOUBLE, ctx), llvm::Intrinsic::floor,
-                                     {_interp->_jvm->dpop()});
-      annotate_generated_instruction(*call, desc, decision);
-      _interp->_jvm->dpush(call);
-      return true;
-    case vmIntrinsics::_ceil:
-      call = builder.CreateIntrinsic(JeandleType::java2llvm(T_DOUBLE, ctx), llvm::Intrinsic::ceil,
-                                     {_interp->_jvm->dpop()});
-      annotate_generated_instruction(*call, desc, decision);
-      _interp->_jvm->dpush(call);
-      return true;
-    case vmIntrinsics::_rint:
-      call = builder.CreateIntrinsic(JeandleType::java2llvm(T_DOUBLE, ctx), llvm::Intrinsic::rint,
-                                     {_interp->_jvm->dpop()});
-      annotate_generated_instruction(*call, desc, decision);
-      _interp->_jvm->dpush(call);
-      return true;
-    default:
-      return false;
+  for (const PureMathSpec& spec : kPureMathTable) {
+    if (spec.vm_id != desc.id) continue;
+    llvm::LLVMContext& ctx = *_interp->_context;
+    llvm::IRBuilder<>& builder = _interp->_ir_builder;
+
+    llvm::SmallVector<llvm::Value*, 2> args;
+    args.push_back(pop_by_type(_interp->_jvm,spec.operand_type));
+    if (spec.needs_poison_flag) {
+      args.push_back(builder.getInt1(false));
+    }
+
+    llvm::CallInst* call = builder.CreateIntrinsic(
+        JeandleType::java2llvm(spec.operand_type, ctx), spec.llvm_id, args);
+    annotate_generated_instruction(*call, desc, decision);
+
+    llvm::Value* result = call;
+    if (spec.result_type != spec.operand_type) {
+      // e.g. Long.bitCount(long): ctpop gives i64, push as i32.
+      result = builder.CreateTrunc(call, JeandleType::java2llvm(spec.result_type, ctx));
+    }
+    push_by_type(_interp->_jvm,spec.result_type, result);
+    return true;
   }
+  return false;
 }
 
 bool JeandleIntrinsicLowering::lower_type_coercion(const JeandleIntrinsicDescriptor& desc,
                                                    const JeandleIntrinsicDecision& decision) {
-  llvm::LLVMContext& ctx = *_interp->_context;
-  llvm::IRBuilder<>& builder = _interp->_ir_builder;
-  llvm::Value* cast = nullptr;
-  switch (desc.id) {
-    case vmIntrinsics::_floatToRawIntBits:
-      cast = builder.CreateBitCast(_interp->_jvm->fpop(), builder.getInt32Ty());
-      if (llvm::Instruction* inst = llvm::dyn_cast<llvm::Instruction>(cast)) {
-        annotate_generated_instruction(*inst, desc, decision);
-      }
-      _interp->_jvm->ipush(cast);
-      return true;
-    case vmIntrinsics::_intBitsToFloat:
-      cast = builder.CreateBitCast(_interp->_jvm->ipop(), llvm::Type::getFloatTy(ctx));
-      if (llvm::Instruction* inst = llvm::dyn_cast<llvm::Instruction>(cast)) {
-        annotate_generated_instruction(*inst, desc, decision);
-      }
-      _interp->_jvm->fpush(cast);
-      return true;
-    case vmIntrinsics::_doubleToRawLongBits:
-      cast = builder.CreateBitCast(_interp->_jvm->dpop(), builder.getInt64Ty());
-      if (llvm::Instruction* inst = llvm::dyn_cast<llvm::Instruction>(cast)) {
-        annotate_generated_instruction(*inst, desc, decision);
-      }
-      _interp->_jvm->lpush(cast);
-      return true;
-    case vmIntrinsics::_longBitsToDouble:
-      cast = builder.CreateBitCast(_interp->_jvm->lpop(), llvm::Type::getDoubleTy(ctx));
-      if (llvm::Instruction* inst = llvm::dyn_cast<llvm::Instruction>(cast)) {
-        annotate_generated_instruction(*inst, desc, decision);
-      }
-      _interp->_jvm->dpush(cast);
-      return true;
-    default:
-      return false;
+  for (const TypeCoercionSpec& spec : kTypeCoercionTable) {
+    if (spec.vm_id != desc.id) continue;
+    llvm::LLVMContext& ctx = *_interp->_context;
+    llvm::IRBuilder<>& builder = _interp->_ir_builder;
+
+    llvm::Value* src = pop_by_type(_interp->_jvm,spec.src_type);
+    llvm::Value* cast = builder.CreateBitCast(src, JeandleType::java2llvm(spec.dst_type, ctx));
+    // CreateBitCast may constant-fold to a llvm::Constant when the source is
+    // a constant; only annotate if we actually emitted an instruction.
+    if (llvm::Instruction* inst = llvm::dyn_cast<llvm::Instruction>(cast)) {
+      annotate_generated_instruction(*inst, desc, decision);
+    }
+    push_by_type(_interp->_jvm,spec.dst_type, cast);
+    return true;
   }
+  return false;
 }
 
 bool JeandleIntrinsicLowering::lower_libm_math(const JeandleIntrinsicDescriptor& desc,
